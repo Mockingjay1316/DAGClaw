@@ -4,8 +4,58 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claw UI is a local web dashboard for managing multiple Claude Code instances working on subtasks in parallel, with real-time streaming output. The project is in its initial stage.
+Claw UI is a multi-stage recursive orchestration engine for Claude Code. It decomposes tasks into subtasks via a Plan → Execute → Verify pipeline, running subtasks in parallel via DAG scheduling. Currently in Phase 0 (CLI-only bootstrap).
+
+## Commands
+
+```bash
+# Run tests (all)
+node --import tsx --test src/__tests__/*.test.ts
+
+# Run a single test file
+node --import tsx --test src/__tests__/cli.test.ts
+
+# Type check
+npx tsc --noEmit
+
+# Run CLI
+node --import tsx bin/claw.js "your task"
+
+# Run history
+node --import tsx bin/claw.js runs
+node --import tsx bin/claw.js runs --last
+```
+
+Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm/nvm.sh` first.
+
+## Architecture
+
+**Pipeline**: Orchestrator drives stages sequentially: Plan → Execute → Verify. Each stage is a `StageDefinition` with `contextBuilder`, `resultHandler`, and `formatStatus`. The orchestrator is stage-agnostic — all stage-specific logic lives in `src/stageDefinitions.ts`.
+
+**Single execution primitive**: `TaskOrchestrator.runOne()` handles both standalone stages (Plan, Verify) and individual subtasks within parallel stages (Execute). DAG scheduling via `DependencyResolver`.
+
+**Structured output via files**: Agents write JSON to `.claw/tmp/` files. Orchestrator reads and validates via Zod schemas in `claudeRunner.ts`.
+
+**Key files**:
+- `src/types.ts` — All interfaces and Zod schemas (`PipelineState`, `StageDefinition`, `Plan`, etc.)
+- `src/claudeRunner.ts` — Claude CLI execution, prompt building, output parsing, usage tracking
+- `src/stageDefinitions.ts` — Built-in Plan/Execute/Verify stage configs
+- `src/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, concurrency control
+- `src/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading
+- `src/runLogger.ts` — Persistent logging to `.claw/runs/`
+- `src/memoryManager.ts` — Memory distillation and injection from `.claw/memory/`
+- `src/taskManager.ts` — Lockfile management, task node creation
+- `src/promptBuilder.ts` — Template interpolation, snapshot formatting
+- `src/cli.ts` — CLI entry point, arg parsing, terminal output
+
+## Conventions
+
+- **TDD**: Write tests first, then implementation
+- **Test runner**: `node:test` (built-in, zero deps)
+- **No build step**: TypeScript runs directly via tsx
+- **Small functions**: Keep each function small and focused
+- **PLAN.md sync**: Update PLAN.md when code deviates from it
 
 ## Architecture & Execution Plan
 
-See `PLAN.md` in the repository root for the full system architecture, tech stack decisions, project structure, and phased implementation plan.
+See `PLAN.md` for full system architecture and phased implementation plan.
