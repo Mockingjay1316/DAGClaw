@@ -145,18 +145,41 @@ export interface SubtaskDefinition {
   dependencies: number[];
 }
 
+/**
+ * Pipeline state passed between stages.
+ * Each stage reads what it needs and writes its output here.
+ */
+export interface PipelineState {
+  prompt: string;
+  workDir: string;
+  plan: Plan | null;
+  subtaskSnapshots: Map<number, ContextSnapshot>;
+  skippedIndices: number[];
+  memoryContext: string;
+  verification: VerificationResult | null;
+}
+
 export interface StageDefinition {
   name: string;
   runnerConfig: Partial<ClaudeRunnerConfig>;
   approvalRequired?: boolean;
+  /** If true, uses DAG from plan subtasks for parallel execution. */
   parallel?: boolean;
-  subtaskExtractor?: (priorOutput: unknown) => SubtaskDefinition[];
+  /** Extract subtask definitions from prior pipeline state (for parallel stages). */
+  subtaskExtractor?: (state: PipelineState) => SubtaskDefinition[];
+  /** Build the template context dict for this stage's prompt. */
+  contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
+  /** Parse and apply the stage's output to pipeline state. Returns display message. */
+  resultHandler: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition, sessionId?: string) => string;
+  /** Interpret result for pass/fail (verify stage). */
   resultInterpreter?: (output: unknown) => {
     pass: boolean;
     failedIndices?: number[];
   };
   integrationVerifier?: boolean;
   maxRetries?: number;
+  /** Format a status line for this stage/subtask. */
+  formatStatus?: (subtask?: SubtaskDefinition, status?: string) => string;
 }
 
 // --- Task Node ---

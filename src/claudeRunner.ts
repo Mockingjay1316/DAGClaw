@@ -1,10 +1,13 @@
 /**
- * Claude backend runner: CLI subprocess execution, usage parsing, cost estimation.
- * SDK backend is stubbed for v0.1.0 (falls back to CLI).
+ * Claude backend runner: CLI subprocess execution, usage parsing, cost estimation,
+ * structured output parsing, and prompt building for stages.
  */
 
-import { execFileSync } from 'node:child_process';
-import type { ContextSnapshot, UsageStats } from './types.ts';
+import { spawn, execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import type { ContextSnapshot, RunnerBackend, UsageStats } from './types.ts';
+import { PlanSchema, ExecutorOutputSchema, VerificationResultSchema } from './types.ts';
+import { interpolateTemplate } from './promptBuilder.ts';
 
 // --- Pricing (Sonnet 4, USD per 1M tokens) ---
 
@@ -88,4 +91,128 @@ export function buildSnapshotFromOutput(
     summary: structuredOutput?.summary ?? '',
     sessionId,
   };
+}
+
+// --- Stage prompt building ---
+
+/** Build the prompt for a stage by interpolating its template with context. */
+export function buildStagePrompt(promptTemplate: string, context: Record<string, string>): string {
+  return interpolateTemplate(promptTemplate, context);
+}
+
+// --- Structured output parsing ---
+
+/** Map stage names to their Zod schemas. */
+const STAGE_SCHEMAS: Record<string, { parse: (data: unknown) => unknown }> = {
+  Plan: PlanSchema,
+  Execute: ExecutorOutputSchema,
+  Verify: VerificationResultSchema,
+};
+
+/** Parse raw JSON string against a stage's schema. */
+export function parseStageOutput(stageName: string, raw: string): unknown | null {
+  const schema = STAGE_SCHEMAS[stageName];
+  if (!schema) return null;
+  try {
+    return schema.parse(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a structured output file for a stage. */
+export function parseStageOutputFile(stageName: string, filePath: string): unknown | null {
+  try {
+    return parseStageOutput(stageName, readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+// --- Claude CLI execution ---
+
+export interface RunClaudeOptions {
+  prompt: string;
+  systemPrompt: string;
+  workDir: string;
+  allowedTools?: string[];
+  timeoutMs?: number;
+  backend: RunnerBackend;
+  dangerouslySkipPermissions?: boolean;
+}
+
+export interface RunClaudeResult {
+  rawOutput: string;
+  sessionId: string;
+  usage: UsageStats;
+}
+
+/** Spawn `claude -p` and collect output. */
+export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaudeResult> {
+  const args = ['-p', '--output-format', 'stream-json'];
+
+  if (options.allowedTools?.length) {
+    for (const tool of options.allowedTools) {
+      args.push('--allowedTools', tool);
+    }
+  }
+
+  if (options.dangerouslySkipPermissions) {
+    args.push('--dangerously-skip-permissions');
+  }
+
+  args.push('--system-prompt', options.systemPrompt);
+
+  return new Promise<RunClaudeResult>((resolve, reject) => {
+    const child = spawn('claude', args, {
+      cwd: options.workDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+    child.stdin.write(options.prompt);
+    child.stdin.end();
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (options.timeoutMs) {
+      timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error(`Claude CLI timed out after ${options.timeoutMs}ms`));
+      }, options.timeoutMs);
+    }
+
+    child.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      if (code !== 0 && code !== null) {
+        reject(new Error(`Claude CLI exited with code ${code}: ${stderr}`));
+        return;
+      }
+
+      const lines = stdout.trim().split('\n');
+      let usage = parseUsageFromCliOutput('{}');
+      let sessionId = '';
+
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed.type === 'result') {
+            usage = parseUsageFromCliOutput(line);
+            sessionId = parsed.session_id ?? parsed.sessionId ?? '';
+          }
+        } catch { /* skip non-json lines */ }
+      }
+
+      resolve({ rawOutput: stdout, sessionId, usage });
+    });
+
+    child.on('error', (err) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
+  });
 }

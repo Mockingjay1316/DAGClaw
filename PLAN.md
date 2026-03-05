@@ -135,207 +135,183 @@ for each stage in pipeline:
 mark node completed
 ```
 
-### 2. Generic ClaudeRunner (`backend/src/services/claudeRunner.ts`)
+### 2. Generic ClaudeRunner (`src/claudeRunner.ts`)
 
-**The core abstraction.** All stage runners are fundamentally the same thing: a coding agent wrapper with different context. `ClaudeRunner` is a configurable session executor that supports **multiple backends**.
+**The core execution module.** A consolidated set of functional exports for running Claude, building prompts, parsing structured output, and tracking usage. No class — just pure functions and one async execution function.
 
 ```typescript
-// Backend selection — Agent SDK or CLI subprocess (or future: other tools)
+// v0.1.0: Claude-only backends
 type RunnerBackend =
-  | { type: "sdk" }                          // Agent SDK: @anthropic-ai/claude-agent-sdk query()
-  | { type: "cli"; command?: string }        // CLI: `claude -p --output-format stream-json` (default)
-                                              //   command override enables non-Claude tools (e.g., "codex", "aider")
+  | { type: "sdk" }    // Agent SDK: @anthropic-ai/claude-agent-sdk query()
+  | { type: "cli" }    // CLI: `claude -p --output-format stream-json`
 
+// Stage runner config — each stage provides partial config, orchestrator fills in the rest
 interface ClaudeRunnerConfig {
-  // Backend
-  backend?: RunnerBackend;          // default: "sdk". Fallback to "cli" if SDK unavailable.
-
-  // Prompt construction
-  systemPrompt: string;           // stage-specific instructions + output format
-  promptTemplate: string;         // template with {{placeholders}} for runtime data
-
-  // Output handling
-  outputSchema?: ZodSchema;       // if set, extract + validate JSON from response
-  retryOnParseFailure?: boolean;  // retry once if JSON extraction fails (default true)
-
-  // Execution
-  allowedTools?: string[];        // Claude Code tools to allow (default: all)
-  workDir?: string;               // override working directory
-
-  // Permissions
-  permissionMode?: PermissionMode;  // override per-runner (inherits from TaskNode if not set)
-
-  // Context
-  contextSnapshots?: ContextSnapshot[];  // injected from DAG predecessors + parent stage
-  resumeSessionId?: string;              // only for retrying the SAME subtask
+  systemPrompt?: string;       // stage-specific instructions
+  promptTemplate?: string;     // template with {{placeholders}} for runtime data
+  allowedTools?: string[];     // Claude Code tools to allow (default: all)
+  timeoutMs?: number;          // per-subtask timeout (default 300000 = 5 min)
 }
 
-interface ClaudeRunnerResult {
-  rawOutput: string;              // full text response
-  structuredOutput?: any;         // parsed JSON if outputSchema was provided
-  sessionId: string;              // for retrying THIS task only (not for chaining)
-  contextSnapshot: ContextSnapshot; // auto-generated snapshot for downstream tasks
-  messages: SDKMessage[];         // all streamed messages
-  usage: UsageStats;              // token usage and cost tracking
+// Options for a single Claude invocation
+interface RunClaudeOptions {
+  prompt: string;                       // interpolated prompt (from buildStagePrompt)
+  systemPrompt: string;                 // from stage config
+  workDir: string;
+  allowedTools?: string[];
+  timeoutMs?: number;
+  backend: RunnerBackend;
+  dangerouslySkipPermissions?: boolean;
 }
 
-interface UsageStats {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  estimatedCost: number;          // USD estimate based on model pricing
-  durationMs: number;
-}
-
-class ClaudeRunner {
-  constructor(private config: ClaudeRunnerConfig) {}
-
-  async run(context: Record<string, string>): AsyncGenerator<SDKMessage, ClaudeRunnerResult> {
-    // 1. Interpolate {{placeholders}} in promptTemplate with context values
-    // 2. Dispatch to backend:
-    //    - "sdk": call Agent SDK query() with systemPrompt + interpolated prompt
-    //    - "cli": spawn `claude -p --output-format stream-json` (or custom command) as subprocess
-    // 3. Yield each message as it streams
-    // 4. If outputSchema set: extract JSON, validate with Zod
-    // 5. On parse failure + retryOnParseFailure: send follow-up asking to fix JSON
-    // 6. Collect usage stats from SDK response or CLI JSON output
-    // 7. Return ClaudeRunnerResult with usage
-  }
+// Result of a single Claude invocation
+interface RunClaudeResult {
+  rawOutput: string;       // full stream-json output
+  sessionId: string;       // for retrying THIS subtask only
+  usage: UsageStats;       // token usage and cost tracking
 }
 ```
 
-**Backend selection logic:**
-- Default: Agent SDK (`"sdk"`). Structured, typed, recommended.
-- Fallback: CLI (`"cli"`). Uses `claude -p --output-format stream-json`. No API key needed — uses Claude Code's own auth. Set via `--backend cli` flag or in config.
-- Custom: `{ type: "cli", command: "codex" }` or any CLI tool that accepts a prompt on stdin and outputs to stdout. This enables users to swap in alternative coding agents.
+**Key exports:**
+
+| Function | Purpose |
+|----------|---------|
+| `estimateCost(input, output, cacheRead, cacheCreation)` | USD estimate from token counts (Sonnet 4 pricing) |
+| `parseUsageFromCliOutput(output)` | Extract `UsageStats` from CLI stream-json result line |
+| `checkClaudeCli()` | Check if `claude` binary is on PATH |
+| `buildSnapshotFromOutput(meta, output, sessionId)` | Build a `ContextSnapshot` from executor structured output |
+| `buildStagePrompt(template, context)` | Interpolate `{{placeholders}}` in prompt template |
+| `parseStageOutput(stageName, rawJson)` | Validate JSON string against stage's Zod schema |
+| `parseStageOutputFile(stageName, filePath)` | Read file + validate against Zod schema |
+| `runClaudeCli(options)` | Spawn `claude -p`, collect output, parse usage + sessionId |
+
+**Structured output via files (not text parsing):**
+Agents write structured JSON to `.claw/tmp/` files. The orchestrator calls `parseStageOutputFile()` to read and validate via Zod schemas:
+- Plan → `.claw/tmp/plan.json` (PlanSchema)
+- Execute subtask N → `.claw/tmp/subtask-N-summary.json` (ExecutorOutputSchema)
+- Verify → `.claw/tmp/verification.json` (VerificationResultSchema)
+
+**Backend selection logic (v0.1.0):**
+- CLI backend: spawns `claude -p --output-format stream-json` as subprocess. No API key needed — uses Claude Code's own auth.
+- SDK backend: placeholder for future Agent SDK integration. `--backend sdk` or `--backend cli` to select.
+- Custom CLI command backends deferred to v0.2+.
 
 **Context flow via snapshots:**
-Each subtask produces a `ContextSnapshot` on completion. The orchestrator injects predecessor snapshots into dependent subtasks' prompts via the `contextSnapshots` field. This enables clean parallel forking (all Execute subtasks inherit Plan's snapshot) and DAG accumulation (dependent subtasks get all predecessors' snapshots). See the "Context Management" section for full details.
+Each subtask produces a `ContextSnapshot` on completion. The stage's `resultHandler` stores snapshots in `PipelineState.subtaskSnapshots`. Dependent subtasks receive predecessor context via `contextBuilder`. This enables clean parallel forking (all Execute subtasks inherit Plan context) and DAG accumulation (dependent subtasks get predecessors' snapshots).
 
-### 3. Stage Definitions (`backend/src/services/stageDefinitions.ts`)
+### 3. Stage Definitions (`src/stageDefinitions.ts`)
 
-Built-in stages are just pre-configured `ClaudeRunnerConfig` objects. Users can define custom stages the same way.
+Each stage is a `StageDefinition` config with three key functions: `contextBuilder` (how to build prompt context from pipeline state), `resultHandler` (how to parse output and update pipeline state), and `formatStatus` (CLI display). The orchestrator treats all stages identically.
 
 ```typescript
+// Shared state flowing through the pipeline — each stage reads and writes to this.
+interface PipelineState {
+  prompt: string;
+  workDir: string;
+  plan: Plan | null;
+  subtaskSnapshots: Map<number, ContextSnapshot>;
+  skippedIndices: number[];
+  memoryContext: string;
+  verification: VerificationResult | null;
+}
+
 interface StageDefinition {
-  name: string;                        // "Plan", "Execute", "Verify", or custom
-  runnerConfig: ClaudeRunnerConfig;    // the Claude Code configuration
+  name: string;
+  runnerConfig: Partial<ClaudeRunnerConfig>;
 
-  // Stage behavior hooks (optional)
-  approvalRequired?: boolean;          // pause for user approval after completion
-  parallel?: boolean;                  // if true, run multiple instances (Execute-style)
+  // Stage behavior flags
+  approvalRequired?: boolean;
+  parallel?: boolean;                  // if true, uses DAG from subtaskExtractor
 
-  // For parallel stages: how to derive subtask list from prior stage output
-  subtaskExtractor?: (priorOutput: any) => SubtaskDefinition[];
+  // Lifecycle functions — each stage implements these
+  subtaskExtractor?: (state: PipelineState) => SubtaskDefinition[];
+  contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
+  resultHandler: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition, sessionId?: string) => string;
 
-  // For verification stages: how to interpret output as pass/fail
+  // Optional
   resultInterpreter?: (output: any) => { pass: boolean; failedIndices?: number[] };
-
-  // Max retries if resultInterpreter returns pass=false
+  integrationVerifier?: boolean;
   maxRetries?: number;
+  formatStatus?: (subtask?: SubtaskDefinition, status?: string) => string;
 }
 ```
 
-**Built-in stage definitions:**
-
-```typescript
-const BUILTIN_STAGES: Record<string, StageDefinition> = {
-  Plan: {
-    name: "Plan",
-    runnerConfig: {
-      systemPrompt: "You are a planning agent. Decompose the task into subtasks...",
-      promptTemplate: "Working directory: {{workDir}}\nTask: {{prompt}}",
-      outputSchema: PlanSchema,  // Zod schema for Plan type
-      allowedTools: ["Read", "Glob", "Grep"],  // read-only for planning
-    },
-    approvalRequired: true,  // default, overridable per task
-  },
-
-  Execute: {
-    name: "Execute",
-    runnerConfig: {
-      systemPrompt: "You are an execution agent. Complete the assigned subtask...",
-      promptTemplate: "Working directory: {{workDir}}\nTask: {{subtaskPrompt}}\nContext: {{planSummary}}",
-      allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-    },
-    parallel: true,
-    subtaskExtractor: (planOutput) => planOutput.subtasks,
-  },
-
-  Verify: {
-    name: "Verify",
-    runnerConfig: {
-      systemPrompt: "You are a verification agent. Review the execution results...",
-      promptTemplate: "Plan: {{plan}}\nExecution results: {{executionOutput}}\nVerify correctness.",
-      outputSchema: VerificationResultSchema,
-      allowedTools: ["Read", "Bash", "Glob", "Grep"],  // can run tests, read files
-    },
-    resultInterpreter: (output) => ({
-      pass: output.overallPass,
-      failedIndices: output.subtaskResults.filter(r => !r.pass && r.retryRecommended).map(r => r.subtaskIndex),
-    }),
-    maxRetries: 3,
-  },
-};
-```
-
-**User-defined custom stages** follow the exact same shape:
-
-```typescript
-// Example: user defines a "Test" stage and a "Review" stage
-const customStages: StageDefinition[] = [
-  {
-    name: "Test",
-    runnerConfig: {
-      systemPrompt: "You are a testing agent. Write and run tests for the implemented code.",
-      promptTemplate: "Working directory: {{workDir}}\nCode changes: {{executionOutput}}\nWrite comprehensive tests.",
-      outputSchema: TestResultSchema,
-      allowedTools: ["Read", "Write", "Bash", "Glob", "Grep"],
-    },
-    resultInterpreter: (output) => ({ pass: output.allTestsPassed }),
-    maxRetries: 2,
-  },
-  {
-    name: "SecurityAudit",
-    runnerConfig: {
-      systemPrompt: "You are a security auditor. Review code for vulnerabilities...",
-      promptTemplate: "Working directory: {{workDir}}\nReview all changes for OWASP top 10 vulnerabilities.",
-      outputSchema: AuditResultSchema,
-      allowedTools: ["Read", "Grep", "Glob"],
-    },
-    approvalRequired: true,  // human reviews security findings
-  },
-];
-
-// User's pipeline: ["Plan", "Execute", "Test", "SecurityAudit", "Verify"]
-```
+Each built-in stage (Plan, Execute, Verify) implements `contextBuilder` and `resultHandler`. For example, Plan's `contextBuilder` maps pipeline state to `{workDir, prompt, memoryContext, outputFile}`, and its `resultHandler` parses the plan JSON and sets `state.plan`. Execute's `resultHandler` builds a `ContextSnapshot` and adds it to `state.subtaskSnapshots`. This eliminates stage-specific code from the orchestrator.
 
 ### 4. Stage Resolution in TaskOrchestrator
 
-The orchestrator resolves each stage name to a `StageDefinition`, then uses the generic logic:
+The orchestrator has a **single execution primitive** (`runOne`) that handles both standalone stages and individual subtasks within a parallel stage:
 
 ```
 for each stageName in pipeline:
-  definition = resolveStage(stageName)  // built-in or user-defined
+  stage = resolveStage(stageName)
 
-  if definition.parallel && definition.subtaskExtractor:
-    subtasks = definition.subtaskExtractor(previousStageOutput)
-    run DAG-based parallel execution via ClaudeRunner instances
+  if stage.parallel && stage.subtaskExtractor:
+    subtasks = stage.subtaskExtractor(state)
+    schedule via DependencyResolver, calling runOne(stage, state, subtask) for each
   else:
-    run single ClaudeRunner with definition.runnerConfig
+    runOne(stage, state)
 
-  if definition.resultInterpreter:
-    result = definition.resultInterpreter(output)
-    if !result.pass: retry failed subtasks up to definition.maxRetries
+  if stage.approvalRequired && !autoApprove:
+    prompt for approval
 
-  if definition.approvalRequired && !node.autoApprove:
-    pause, await approval
+runOne(stage, state, subtask?):
+  context = stage.contextBuilder(state, outputFile, subtask)
+  prompt = interpolate(stage.runnerConfig.promptTemplate, context)
+  result = runClaudeCli(prompt, systemPrompt, ...)
+  message = stage.resultHandler(state, outputFile, subtask, result.sessionId)
 ```
 
-This means **PlanRunner, ExecuteRunner, and VerifyRunner are no longer separate classes**. They are just different `StageDefinition` configs processed by the same orchestrator logic. The orchestrator itself handles the parallel dispatch, retry loops, and approval gates based on the definition's flags.
+There are no stage-specific methods in the orchestrator. All stage differences are expressed through the `StageDefinition` config functions.
 
-### 5. DependencyResolver (`backend/src/services/dependencyResolver.ts`)
+### 4.1 User-defined Custom Stages
+
+Users can define custom stages by providing a `StageDefinition` object. Since stages are pure config (system prompt, template, and three functions), adding a new stage requires no changes to the orchestrator or runner.
+
+**Minimal example — a "Test" stage:**
+
+```typescript
+const TestStage: StageDefinition = {
+  name: "Test",
+  runnerConfig: {
+    systemPrompt: "You are a testing agent. Write and run tests for the code changes.",
+    promptTemplate: "Working directory: {{workDir}}\nPlan: {{planSummary}}\nWrite and run tests.\nWrite results to: {{outputFile}}",
+    allowedTools: ["Read", "Write", "Bash", "Glob", "Grep"],
+  },
+
+  // contextBuilder: map pipeline state → template variables
+  contextBuilder: (state, outputFile) => ({
+    workDir: state.workDir,
+    planSummary: state.plan?.summary ?? '',
+    outputFile,
+  }),
+
+  // resultHandler: parse output file, update state, return display message
+  resultHandler: (state, outputFile) => {
+    const result = parseStageOutputFile('Test', outputFile);
+    if (!result) return '[Test] Could not parse test results.';
+    return `[Test] ${result.passed} passed, ${result.failed} failed`;
+  },
+
+  resultInterpreter: (output) => ({
+    pass: output.allPassed,
+    failedIndices: [],
+  }),
+  maxRetries: 2,
+};
+
+// Use in pipeline: --pipeline "Plan,Execute,Test,Verify"
+```
+
+**Registration (v0.1.0):** Custom stages are registered programmatically by adding to `BUILTIN_STAGES`. In v0.2+, users will be able to define stages in a `claw.config.json` file in their project root, which the CLI loads on startup.
+
+**Key constraints for custom stages:**
+- `contextBuilder` must return a `Record<string, string>` that matches the `{{placeholders}}` in `promptTemplate`
+- `resultHandler` receives the output file path and must parse it (using the appropriate Zod schema) and update `PipelineState` as needed
+- Parallel stages must provide `subtaskExtractor` to derive subtask list from pipeline state
+- Custom stages have access to the full `PipelineState`, so they can read plan context, predecessor snapshots, memory, etc.
+
+### 5. DependencyResolver (`src/dependencyResolver.ts`)
 
 Topological sort utility for the subtask DAG (used by any stage with `parallel: true`):
 - `getReady()` — returns subtasks whose dependencies are all complete
@@ -495,15 +471,16 @@ and it Plans → Executes → Verifies autonomously.
 claw_ui/
 ├── src/
 │   ├── cli.ts                    # CLI entry: parse args, run orchestrator, print to terminal
-│   ├── types.ts                  # Core types (TaskNode, StageDefinition, ClaudeRunnerConfig, Plan, etc.)
-│   ├── claudeRunner.ts           # Generic Claude Code wrapper
-│   ├── stageDefinitions.ts       # Built-in Plan/Execute/Verify configs
+│   ├── types.ts                  # Core types (TaskNode, StageDefinition, PipelineState, Plan, etc.)
+│   ├── claudeRunner.ts           # Claude CLI/SDK execution, usage parsing, prompt building, output parsing
+│   ├── promptBuilder.ts          # Template interpolation, snapshot formatting, prompt assembly
+│   ├── stageDefinitions.ts       # Built-in Plan/Execute/Verify configs (contextBuilder, resultHandler)
 │   ├── dependencyResolver.ts     # DAG topological sort
-│   ├── taskOrchestrator.ts       # Pipeline driver (single workflow, sequential stages)
-│   ├── taskManager.ts            # Minimal: just creates/tracks nodes, no REST
+│   ├── taskOrchestrator.ts       # Generic pipeline driver with single runOne() primitive
+│   ├── taskManager.ts            # Lockfile management, task node creation
 │   ├── runLogger.ts              # Persistent run logging to .claw/runs/
-│   └── memoryManager.ts          # Distill memory from run logs, inject into future runs
-├── package.json                  # deps: @anthropic-ai/claude-agent-sdk, zod, uuid
+│   └── memoryManager.ts          # Read/write .claw/memory/, inject into context
+├── package.json                  # deps: tsx, zod (minimal)
 ├── tsconfig.json
 ├── PLAN.md
 ├── CLAUDE.md

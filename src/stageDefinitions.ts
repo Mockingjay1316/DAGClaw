@@ -1,14 +1,17 @@
 /**
  * Built-in stage definitions: Plan, Execute, Verify.
- * Each is a StageDefinition config — stages differ only in config, not in code.
+ * Each stage is a StageDefinition config with contextBuilder and resultHandler.
+ * Stages differ only in config — the orchestrator loop is generic.
  */
 
 import type {
   StageDefinition,
   SubtaskDefinition,
+  PipelineState,
   Plan,
   VerificationResult,
 } from './types.ts';
+import { parseStageOutputFile } from './claudeRunner.ts';
 
 // --- Plan Stage ---
 
@@ -119,6 +122,22 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       allowedTools: ['Read', 'Glob', 'Grep'],
     },
     approvalRequired: true,
+
+    contextBuilder: (state, outputFile) => ({
+      workDir: state.workDir,
+      prompt: state.prompt,
+      memoryContext: state.memoryContext,
+      outputFile,
+    }),
+
+    resultHandler: (state, outputFile) => {
+      const plan = parseStageOutputFile('Plan', outputFile) as Plan | null;
+      if (!plan) return '[Plan] Failed to parse plan output.';
+      state.plan = plan;
+      return `[Plan] Generated plan: ${plan.subtasks.length} subtask(s) — ${plan.summary}`;
+    },
+
+    formatStatus: (_subtask, status) => `[Plan] ${status ?? 'Running...'}`,
   },
 
   Execute: {
@@ -128,7 +147,43 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       promptTemplate: EXECUTE_PROMPT_TEMPLATE,
     },
     parallel: true,
-    subtaskExtractor: planSubtaskExtractor,
+
+    subtaskExtractor: (state) => {
+      if (!state.plan) return [];
+      return state.plan.subtasks.map((s) => ({
+        index: s.index,
+        prompt: s.prompt,
+        dependencies: s.dependencies,
+      }));
+    },
+
+    contextBuilder: (state, outputFile, subtask) => ({
+      workDir: state.workDir,
+      subtaskPrompt: subtask?.prompt ?? '',
+      planSummary: state.plan?.summary ?? '',
+      predecessorContext: '',
+      memoryContext: state.memoryContext,
+      outputFile,
+    }),
+
+    resultHandler: (state, outputFile, subtask, sessionId) => {
+      const output = parseStageOutputFile('Execute', outputFile) as { summary: string; oneliner: string } | null;
+      const idx = subtask?.index ?? 0;
+      const snap = {
+        nodeId: '',
+        stage: 'Execute',
+        subtaskIndex: idx,
+        oneliner: output?.oneliner ?? '',
+        filesModified: [] as string[],
+        summary: output?.summary ?? '',
+        sessionId: sessionId ?? '',
+      };
+      state.subtaskSnapshots.set(idx, snap);
+      return `[Execute] [${idx}] Done: ${snap.oneliner || '(completed)'}`;
+    },
+
+    formatStatus: (subtask, status) =>
+      `[Execute] [${subtask?.index ?? '?'}] ${status ?? 'Running...'}`,
   },
 
   Verify: {
@@ -138,9 +193,35 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       promptTemplate: VERIFY_PROMPT_TEMPLATE,
       allowedTools: ['Read', 'Bash', 'Glob', 'Grep'],
     },
+
+    contextBuilder: (state, outputFile) => {
+      const summaries = Array.from(state.subtaskSnapshots.entries())
+        .map(([idx, s]) => `[Subtask ${idx}] ${s.summary || s.oneliner || '(no summary)'}`)
+        .join('\n');
+      return {
+        workDir: state.workDir,
+        planSummary: state.plan?.summary ?? '(no plan)',
+        subtaskSummaries: summaries,
+        skippedIndices: state.skippedIndices.length > 0 ? state.skippedIndices.join(', ') : 'none',
+        outputFile,
+      };
+    },
+
+    resultHandler: (state, outputFile) => {
+      const result = parseStageOutputFile('Verify', outputFile) as VerificationResult | null;
+      if (!result) return '[Verify] Could not parse verification result.';
+      state.verification = result;
+      const { pass, failedIndices } = verifyResultInterpreter(result);
+      return pass
+        ? '[Verify] All checks passed.'
+        : `[Verify] Failed subtasks: ${failedIndices.join(', ')}`;
+    },
+
     resultInterpreter: verifyResultInterpreter,
     integrationVerifier: true,
     maxRetries: 2,
+
+    formatStatus: (_subtask, status) => `[Verify] ${status ?? 'Running...'}`,
   },
 };
 
@@ -155,7 +236,7 @@ export function getStageDefinition(name: string): StageDefinition {
   return stage;
 }
 
-/** Extract subtask definitions from a Plan output. */
+/** Extract subtask definitions from a Plan output (legacy helper). */
 export function planSubtaskExtractor(plan: unknown): SubtaskDefinition[] {
   const p = plan as Plan;
   return p.subtasks.map((s) => ({
