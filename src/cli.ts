@@ -102,7 +102,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     workDir: (flags.workDir as string) || process.cwd(),
     pipeline,
     backend,
-    permissionMode: DEFAULTS.permissionMode,
+    permissionMode: flags.yolo ? 'auto' as const
+      : flags.autoApprove ? 'plan-only' as const
+      : DEFAULTS.permissionMode,
     autoApprove: !!(flags.yolo || flags.autoApprove),
     maxRetries: DEFAULTS.maxRetries,
     maxConcurrency: flags.maxConcurrency
@@ -149,7 +151,7 @@ function handleRuns(parsed: ParsedArgs): void {
   }
 
   if (parsed.runsLast) {
-    const last = runs[runs.length - 1];
+    const last = runs[0];
     log(`Run: ${last.id}`);
     log(`  Prompt:   ${last.prompt}`);
     log(`  Status:   ${last.status}`);

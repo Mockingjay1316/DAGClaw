@@ -156,6 +156,7 @@ export class RunLogger {
   ): void {
     const manifest = this.readManifest(runId);
     manifest.usage.perStage[stageName] = usage;
+    this.recalcTotals(manifest);
     this.writeManifest(runId, manifest);
   }
 

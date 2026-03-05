@@ -56,7 +56,7 @@ export const SubtaskSchema = z.object({
 export const PlanSchema = z.object({
   summary: z.string(),
   subtasks: z.array(SubtaskSchema),
-  qualityFlag: QualityFlagSchema.optional(),
+  qualityFlag: QualityFlagSchema.nullable().optional(),
   worthDistilling: z.boolean(),
 });
 
@@ -171,11 +171,13 @@ export interface StageDefinition {
   contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
   /** Parse and apply the stage's output to pipeline state. Returns display message. */
   resultHandler: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition, sessionId?: string) => string;
-  /** Interpret result for pass/fail (verify stage). */
+  /** Interpret result for pass/fail. */
   resultInterpreter?: (output: unknown) => {
     pass: boolean;
     failedIndices?: number[];
   };
+  /** Stage name to re-run for failed subtasks (e.g., "Execute"). */
+  retryStage?: string;
   integrationVerifier?: boolean;
   maxRetries?: number;
   /** Format a status line for this stage/subtask. */

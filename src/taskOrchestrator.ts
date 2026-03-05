@@ -206,6 +206,19 @@ export class TaskOrchestrator {
             return { runId, success: false };
           }
         }
+
+        // Generic retry loop: if resultInterpreter reports failure and
+        // retryStage is configured, re-run that stage for failed indices,
+        // then re-run this stage to re-check. Up to maxRetries times.
+        if (stage.resultInterpreter && state.verification) {
+          this.logger.writeVerification(runId, state.verification);
+          const result = await this.retryLoop(runId, stage, state);
+          if (!result) {
+            this.logger.updateManifestStatus(runId, 'failed');
+            this.printCostSummary(runId);
+            return { runId, success: false };
+          }
+        }
       }
 
       this.logger.updateManifestStatus(runId, 'completed');
@@ -245,7 +258,7 @@ export class TaskOrchestrator {
       allowedTools: stage.runnerConfig.allowedTools,
       timeoutMs: this.opts.timeoutSeconds * 1000,
       backend: this.opts.backend,
-      dangerouslySkipPermissions: stage.name !== 'Plan',
+      dangerouslySkipPermissions: true,  // always skip in CLI -p mode; tools restricted via allowedTools
     });
 
     if (subtask !== undefined) {
@@ -318,6 +331,77 @@ export class TaskOrchestrator {
     const ok = await this.cb.onApprovalRequest?.('\n  Approve plan? (y/n): ');
     if (!ok) { this.status(`[${stageName}] Rejected.`); return false; }
     return true;
+  }
+
+  /**
+   * Generic retry loop driven by stage config.
+   * Returns true if the stage eventually passes, false if retries exhausted.
+   */
+  private async retryLoop(
+    runId: string,
+    stage: StageDefinition,
+    state: PipelineState,
+  ): Promise<boolean> {
+    const maxRetries = stage.maxRetries ?? this.opts.maxRetries;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const interpreted = stage.resultInterpreter!(state.verification!);
+
+      if (interpreted.pass) {
+        this.status(`[${stage.name}] All checks passed.`);
+        return true;
+      }
+
+      const failedIndices = interpreted.failedIndices ?? [];
+      this.logStageFailure(stage.name, state, failedIndices);
+
+      // No retryStage configured or no retryable indices — fail immediately
+      if (!stage.retryStage || failedIndices.length === 0 || attempt >= maxRetries) {
+        if (attempt >= maxRetries && failedIndices.length > 0) {
+          this.status(`[${stage.name}] Max retries (${maxRetries}) reached.`);
+        }
+        return false;
+      }
+
+      // Re-run the configured retry stage for failed indices only
+      this.status(`[${stage.name}] Re-executing ${failedIndices.length} subtask(s) via ${stage.retryStage} (attempt ${attempt + 1}/${maxRetries})...`);
+      const retryStage = getStageDefinition(stage.retryStage);
+      const allSubtasks = retryStage.subtaskExtractor?.(state) ?? [];
+      const retrySubtasks = allSubtasks.filter(s => failedIndices.includes(s.index));
+
+      for (const subtask of retrySubtasks) {
+        if (this.isShuttingDown) return false;
+        const msg = await this.runOne(runId, retryStage, state, subtask);
+        this.status(msg);
+      }
+
+      // Re-run this stage to re-check
+      this.status(`[${stage.name}] Re-checking...`);
+      state.verification = null;
+      await this.runOne(runId, stage, state);
+      if (state.verification) {
+        this.logger.writeVerification(runId, state.verification);
+      }
+    }
+    return false;
+  }
+
+  private logStageFailure(stageName: string, state: PipelineState, failedIndices: number[]): void {
+    this.status(`[${stageName}] Failed.`);
+    const v = state.verification;
+    if (!v) return;
+    for (const sr of v.subtaskResults) {
+      if (!sr.pass) {
+        const retry = sr.retryRecommended ? ' (will retry)' : '';
+        this.status(`[${stageName}] [${sr.subtaskIndex}] ${sr.summary}${retry}`);
+      }
+    }
+    if (!v.integrationResult.pass) {
+      this.status(`[${stageName}] Integration: ${v.integrationResult.summary}`);
+      for (const issue of v.integrationResult.issues) {
+        this.status(`[${stageName}]   - ${issue}`);
+      }
+    }
   }
 
   // --- Lifecycle ---

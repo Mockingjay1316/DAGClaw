@@ -115,7 +115,9 @@ export function parseStageOutput(stageName: string, raw: string): unknown | null
   if (!schema) return null;
   try {
     return schema.parse(JSON.parse(raw));
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[parseStageOutput] ${stageName} validation failed: ${msg.slice(0, 300)}\n`);
     return null;
   }
 }
@@ -149,7 +151,7 @@ export interface RunClaudeResult {
 
 /** Spawn `claude -p` and collect output. */
 export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaudeResult> {
-  const args = ['-p', '--output-format', 'stream-json'];
+  const args = ['-p', '--verbose', '--output-format', 'stream-json'];
 
   if (options.allowedTools?.length) {
     for (const tool of options.allowedTools) {

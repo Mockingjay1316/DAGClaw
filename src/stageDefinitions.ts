@@ -119,7 +119,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     runnerConfig: {
       systemPrompt: PLAN_SYSTEM_PROMPT,
       promptTemplate: PLAN_PROMPT_TEMPLATE,
-      allowedTools: ['Read', 'Glob', 'Grep'],
+      allowedTools: ['Read', 'Glob', 'Grep', 'Write'],
     },
     approvalRequired: true,
 
@@ -191,7 +191,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     runnerConfig: {
       systemPrompt: VERIFY_SYSTEM_PROMPT,
       promptTemplate: VERIFY_PROMPT_TEMPLATE,
-      allowedTools: ['Read', 'Bash', 'Glob', 'Grep'],
+      allowedTools: ['Read', 'Bash', 'Glob', 'Grep', 'Write'],
     },
 
     contextBuilder: (state, outputFile) => {
@@ -218,6 +218,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     },
 
     resultInterpreter: verifyResultInterpreter,
+    retryStage: 'Execute',
     integrationVerifier: true,
     maxRetries: 2,
 
