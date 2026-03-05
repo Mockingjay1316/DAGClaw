@@ -34,7 +34,7 @@ describe('parseStageOutput', () => {
   });
 
   it('parses Execute output', () => {
-    const executor = { summary: 'Did the thing', oneliner: 'thing done' };
+    const executor = { success: true, summary: 'Did the thing', oneliner: 'thing done' };
     const result = parseStageOutput('Execute', JSON.stringify(executor));
     assert.ok(result !== null);
     assert.equal((result as any).oneliner, 'thing done');

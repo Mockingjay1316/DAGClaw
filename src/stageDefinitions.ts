@@ -61,9 +61,12 @@ Complete the assigned subtask. You have full access to Read, Edit, Write, Bash, 
 
 When you are done, write a JSON summary to the output file path provided in your prompt:
 {
+  "success": true,
   "summary": "paragraph describing what you did and key decisions made",
   "oneliner": "one-line description of the change"
-}`;
+}
+
+Set "success" to false if you could not complete the task (e.g., permission denied, missing prerequisites, impossible constraints). Always write the output file even on failure — describe what went wrong in the summary.`;
 
 const EXECUTE_PROMPT_TEMPLATE = `Working directory: {{workDir}}
 
@@ -167,8 +170,14 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     }),
 
     resultHandler: (state, outputFile, subtask, sessionId) => {
-      const output = parseStageOutputFile('Execute', outputFile) as { summary: string; oneliner: string } | null;
+      const output = parseStageOutputFile('Execute', outputFile) as { success: boolean; summary: string; oneliner: string } | null;
       const idx = subtask?.index ?? 0;
+
+      // Signal failure so DAG runner can cascade-skip dependents
+      if (output && !output.success) {
+        throw new Error(`Subtask ${idx} failed: ${output.summary}`);
+      }
+
       const snap = {
         nodeId: '',
         stage: 'Execute',

@@ -93,6 +93,7 @@ export type VerificationResult = z.infer<typeof VerificationResultSchema>;
 // --- Executor Output ---
 
 export const ExecutorOutputSchema = z.object({
+  success: z.boolean(),
   summary: z.string(),
   oneliner: z.string(),
 });
