@@ -136,6 +136,16 @@ export class RunLogger {
     fs.appendFileSync(logPath, data);
   }
 
+  /** Append output to a stage log file (Plan, Verify, etc). Numbered for retries. */
+  appendStageLog(runId: string, stageName: string, data: string): void {
+    const dir = this.runDir(runId);
+    const prefix = stageName.toLowerCase();
+    const existing = fs.readdirSync(dir).filter(f => f.startsWith(prefix) && f.endsWith('.log'));
+    const attempt = existing.length;
+    const filename = attempt === 0 ? `${prefix}.log` : `${prefix}-${attempt}.log`;
+    fs.appendFileSync(path.join(dir, filename), data);
+  }
+
   /** Update per-subtask usage stats in the manifest. */
   updateSubtaskUsage(
     runId: string,
@@ -160,10 +170,45 @@ export class RunLogger {
     this.writeManifest(runId, manifest);
   }
 
-  /** Write verification result to run directory. */
+  /** Write verification result to run directory. Appends attempt number to preserve retry history. */
   writeVerification(runId: string, result: VerificationResult): void {
-    const verifyPath = path.join(this.runDir(runId), 'verification.json');
+    const dir = this.runDir(runId);
+    // Find next attempt number
+    const existing = fs.readdirSync(dir).filter(f => f.startsWith('verification'));
+    const attempt = existing.length;
+    // Write numbered file (verification-0.json, verification-1.json, ...)
+    const verifyPath = path.join(dir, `verification-${attempt}.json`);
     fs.writeFileSync(verifyPath, JSON.stringify(result, null, 2));
+    // Also write latest as verification.json for easy access
+    fs.writeFileSync(path.join(dir, 'verification.json'), JSON.stringify(result, null, 2));
+  }
+
+  /** Log the prompt sent to a stage/subtask invocation. */
+  logStagePrompt(
+    runId: string,
+    stageName: string,
+    prompt: string,
+    systemPrompt: string,
+    subtaskIndex?: number,
+  ): void {
+    const dir = path.join(this.runDir(runId), 'prompts');
+    fs.mkdirSync(dir, { recursive: true });
+    const label = subtaskIndex !== undefined
+      ? `${stageName.toLowerCase()}-subtask-${subtaskIndex}`
+      : stageName.toLowerCase();
+    // Append attempt number if file already exists
+    const existing = fs.readdirSync(dir).filter(f => f.startsWith(label));
+    const attempt = existing.length;
+    const filename = attempt === 0 ? `${label}.md` : `${label}-retry-${attempt}.md`;
+    const content = `# ${stageName}${subtaskIndex !== undefined ? ` [Subtask ${subtaskIndex}]` : ''}${attempt > 0 ? ` (retry ${attempt})` : ''}
+
+## System Prompt
+${systemPrompt}
+
+## Prompt
+${prompt}
+`;
+    fs.writeFileSync(path.join(dir, filename), content);
   }
 
   /** List all runs, sorted by most recent first. */
@@ -225,6 +270,12 @@ export class RunLogger {
 
   private recalcTotals(manifest: RunManifest): void {
     let input = 0, output = 0, cache = 0, cost = 0;
+    for (const usage of Object.values(manifest.usage.perStage)) {
+      input += usage.inputTokens;
+      output += usage.outputTokens;
+      cache += usage.cacheReadTokens;
+      cost += usage.estimatedCost;
+    }
     for (const usage of Object.values(manifest.usage.perSubtask)) {
       input += usage.inputTokens;
       output += usage.outputTokens;

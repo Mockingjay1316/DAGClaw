@@ -248,12 +248,14 @@ export class TaskOrchestrator {
     const outputFile = this.logger.tmpPath(`${fileLabel}.json`);
     const context = stage.contextBuilder(state, outputFile, subtask);
     const prompt = buildStagePrompt(stage.runnerConfig.promptTemplate!, context);
+    const systemPrompt = stage.runnerConfig.systemPrompt!;
 
+    this.logger.logStagePrompt(runId, stage.name, prompt, systemPrompt, subtask?.index);
     this.status(stage.formatStatus?.(subtask) ?? `[${stage.name}] Running...`);
 
     const result = await runClaudeCli({
       prompt,
-      systemPrompt: stage.runnerConfig.systemPrompt!,
+      systemPrompt,
       workDir: state.workDir,
       allowedTools: stage.runnerConfig.allowedTools,
       timeoutMs: this.opts.timeoutSeconds * 1000,
@@ -266,6 +268,7 @@ export class TaskOrchestrator {
       this.logger.appendSubtaskLog(runId, subtask.index, result.rawOutput);
     } else {
       this.logger.updateStageUsage(runId, stage.name, result.usage);
+      this.logger.appendStageLog(runId, stage.name, result.rawOutput);
     }
 
     return stage.resultHandler(state, outputFile, subtask, result.sessionId);
