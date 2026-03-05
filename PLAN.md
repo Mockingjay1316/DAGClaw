@@ -461,27 +461,28 @@ and it Plans → Executes → Verifies autonomously.
 
 ---
 
-### Phase 0: Bootstrap CLI (built by Claude Code directly)
+### Phase 0: Bootstrap CLI (built by Claude Code directly) — ✅ COMPLETE
 
-**Goal**: Minimal CLI that runs a single Plan → Execute → Verify workflow. No web UI, no REST API, no WebSocket. Just the orchestration engine with terminal output. Built by Claude Code in a standard coding flow — the foundation everything else bootstraps from.
+**Status**: All 10 source files implemented. 125 tests passing. TypeScript type-checks clean. CLI entry point functional.
 
-**Files to create (all under `src/`):**
+**Files (all under `src/`):**
 
 ```
 claw_ui/
 ├── src/
-│   ├── cli.ts                    # CLI entry: parse args, run orchestrator, print to terminal
-│   ├── types.ts                  # Core types (TaskNode, StageDefinition, PipelineState, Plan, etc.)
-│   ├── claudeRunner.ts           # Claude CLI/SDK execution, usage parsing, prompt building, output parsing
-│   ├── promptBuilder.ts          # Template interpolation, snapshot formatting, prompt assembly
-│   ├── stageDefinitions.ts       # Built-in Plan/Execute/Verify configs (contextBuilder, resultHandler)
-│   ├── dependencyResolver.ts     # DAG topological sort
-│   ├── taskOrchestrator.ts       # Generic pipeline driver with single runOne() primitive
-│   ├── taskManager.ts            # Lockfile management, task node creation
-│   ├── runLogger.ts              # Persistent run logging to .claw/runs/
-│   └── memoryManager.ts          # Read/write .claw/memory/, inject into context
-├── package.json                  # deps: tsx, zod (minimal)
-├── tsconfig.json
+│   ├── cli.ts                    ✅ CLI entry: arg parsing, plan approval, run history
+│   ├── types.ts                  ✅ All interfaces, Zod schemas, enums
+│   ├── claudeRunner.ts           ✅ CLI spawning, output parsing, usage tracking, cost estimation
+│   ├── promptBuilder.ts          ✅ Template interpolation, snapshot formatting, cache-optimized ordering
+│   ├── stageDefinitions.ts       ✅ Plan/Execute/Verify configs with contextBuilder, resultHandler
+│   ├── dependencyResolver.ts     ✅ DAG topological sort, cycle detection, cascade skipping
+│   ├── taskOrchestrator.ts       ✅ Pipeline driver, runOne(), runDAG(), plan approval
+│   ├── taskManager.ts            ✅ Lockfile management, task node factory
+│   ├── runLogger.ts              ✅ Manifest persistence, usage tracking, run history
+│   └── memoryManager.ts          ✅ Memory reading/writing, context injection
+├── bin/claw.js                   ✅ Entry point (tsx loader)
+├── package.json                  ✅ deps: tsx, zod
+├── tsconfig.json                 ✅
 ├── PLAN.md
 ├── CLAUDE.md
 └── README.md
@@ -570,11 +571,11 @@ npx claw \
 
 ---
 
-### Phase 0.5: Validate Bootstrap (hand-verified)
+### Phase 0.5: Validate Bootstrap (hand-verified) — NEXT
 
 Test the CLI on a trivial task to confirm it works end-to-end:
 ```bash
-npx claw --workdir /tmp/test-project "Create a hello world Express server with TypeScript"
+node --import tsx bin/claw.js --workdir /tmp/test-project "Create a hello world Express server with TypeScript"
 ```
 Verify: plan is generated, subtasks execute, verification passes.
 
@@ -681,20 +682,21 @@ npx claw --workdir . \
 
 ### Summary: What's hand-written vs. self-built
 
-| Component | How it's built |
-|-----------|---------------|
-| Core types (`types.ts`) | Claude Code direct (Phase 0) |
-| `ClaudeRunner` | Claude Code direct (Phase 0) |
-| Built-in stage definitions | Claude Code direct (Phase 0) |
-| `DependencyResolver` | Claude Code direct (Phase 0) |
-| `TaskOrchestrator` (basic) | Claude Code direct (Phase 0) |
-| `TaskManager` (minimal) | Claude Code direct (Phase 0) |
-| CLI entry point | Claude Code direct (Phase 0) |
-| Recursive decomposition | Built by claw (Phase 1) |
-| Custom stage support | Built by claw (Phase 2) |
-| Express + WebSocket backend | Built by claw (Phase 3) |
-| React frontend | Built by claw (Phase 4) |
-| Polish & integration | Built by claw (Phase 5) |
+| Component | How it's built | Status |
+|-----------|---------------|--------|
+| Core types (`types.ts`) | Claude Code direct (Phase 0) | ✅ Done |
+| `ClaudeRunner` | Claude Code direct (Phase 0) | ✅ Done |
+| Built-in stage definitions | Claude Code direct (Phase 0) | ✅ Done |
+| `DependencyResolver` | Claude Code direct (Phase 0) | ✅ Done |
+| `TaskOrchestrator` (basic) | Claude Code direct (Phase 0) | ✅ Done |
+| `TaskManager` (minimal) | Claude Code direct (Phase 0) | ✅ Done |
+| CLI entry point | Claude Code direct (Phase 0) | ✅ Done |
+| End-to-end validation | Hand-verified (Phase 0.5) | ⏳ Next |
+| Recursive decomposition | Built by claw (Phase 1) | Not started |
+| Custom stage support | Built by claw (Phase 2) | Not started |
+| Express + WebSocket backend | Built by claw (Phase 3) | Not started |
+| React frontend | Built by claw (Phase 4) | Not started |
+| Polish & integration | Built by claw (Phase 5) | Not started |
 
 ## Key Design Decisions
 

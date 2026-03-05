@@ -161,10 +161,8 @@ export class TaskOrchestrator {
   async run(): Promise<{ runId: string; success: boolean }> {
     const stale = checkStaleLock(this.opts.workDir);
     if (stale) this.warn(`Cleaned up stale lock from PID ${stale}`);
-    acquireLock(this.opts.workDir);
 
     if (this.opts.backend.type === 'cli' && !checkClaudeCli()) {
-      releaseLock(this.opts.workDir);
       throw new Error('Claude Code CLI not found. Install from https://docs.anthropic.com/claude-code');
     }
 
@@ -173,6 +171,7 @@ export class TaskOrchestrator {
       prompt: this.opts.prompt, pipeline: this.opts.pipeline,
       backend: this.opts.backend.type, permissionMode: this.opts.permissionMode, gitInfo,
     });
+    acquireLock(this.opts.workDir, runId);
     this.logger.cleanTmp();
 
     const state: PipelineState = {
