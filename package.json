@@ -1,0 +1,24 @@
+{
+  "name": "claw",
+  "version": "0.1.0",
+  "description": "Multi-stage recursive orchestration engine for Claude Code",
+  "type": "module",
+  "bin": {
+    "claw": "./bin/claw.js"
+  },
+  "scripts": {
+    "test": "node --import tsx --test src/__tests__/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=19.0.0"
+  }
+}
