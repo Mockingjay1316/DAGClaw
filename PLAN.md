@@ -1038,6 +1038,7 @@ Features identified but explicitly deferred:
 
 | Feature | Version | Notes |
 |---------|---------|-------|
+| Execute-level retry | v0.1.1 | DAG runner retries failed subtasks before cascade-skipping. Stage config `maxAttempts` controls retry count. Executor output gains `retryWorthy: boolean` — agents signal whether failure is transient (network, flaky test) vs permanent (permission denied, missing prereq). DAG runner skips retry when `retryWorthy: false`. |
 | Advanced context management | v0.2+ | Relevance scoring (file overlap), on-demand context tool, context compression for deep DAGs, toxicity detection |
 | Git worktree isolation | v0.2+ | Optional per-subtask worktree for conflict-free parallel execution |
 | CI integration | v0.2+ | Trigger a templated task pipeline on CI failure (just another task, no special handling) |
