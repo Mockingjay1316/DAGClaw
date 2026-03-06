@@ -46,7 +46,9 @@ You: "Build a REST API with user authentication"
 
 1. **Plan** — A read-only Claude instance analyzes the codebase and produces a structured plan with subtasks, dependencies, and complexity estimates
 2. **Execute** — Each subtask runs as an independent Claude Code instance. Independent subtasks run in parallel; dependent ones wait via DAG scheduling
-3. **Verify** — A verification agent reviews all changes, runs tests, and checks integration. Failed subtasks are automatically re-executed and re-verified (up to 2 retries)
+3. **Verify** — A verification agent reviews all changes, runs tests, and checks integration. Failed subtasks are automatically re-executed and re-verified (up to 3 retries)
+
+Complex subtasks marked with `needsRecursiveDecomposition: true` by the planner are automatically decomposed — a child orchestrator runs its own Plan → Execute → Verify pipeline, up to `maxDepth` levels deep (default: 3).
 
 ## CLI Options
 
@@ -96,6 +98,9 @@ Every run is persisted to `.claw/runs/<run-id>/`:
 .claw/runs/2026-03-05T18-26-46_7ea06bfd/
 ├── manifest.json          # run metadata, status, timing, cost
 ├── plan.json              # structured plan output
+├── tmp/                   # run-scoped structured output (persisted)
+│   ├── plan.json
+│   └── subtask-0-summary.json
 ├── prompts/               # exact prompts sent to Claude (for debugging)
 │   ├── plan.md
 │   ├── execute-subtask-0.md
@@ -106,15 +111,17 @@ Every run is persisted to `.claw/runs/<run-id>/`:
 ├── verification-1.json    # retry preserved
 ├── plan.log               # raw Claude output
 ├── verify.log
-└── subtasks/
-    ├── 0.log              # raw output per subtask
-    └── 1.log
+├── subtasks/
+│   ├── 0.log              # raw output per subtask
+│   └── 1.log
+└── children/              # recursive child runs (if any)
+    └── <child-run-id>/    # full run structure nested here
 ```
 
 ## Development
 
 ```bash
-# Run unit tests (125 tests, zero deps test runner)
+# Run unit tests (168 tests, zero deps test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -131,6 +138,7 @@ bash test_scripts/e2e-natural.sh      # open-ended natural language
 bash test_scripts/e2e-stale-lock.sh   # stale lock cleanup
 bash test_scripts/e2e-empty-task.sh   # zero subtasks
 bash test_scripts/e2e-large-dag.sh    # 5-subtask complex DAG
+bash test_scripts/e2e-recursive.sh    # recursive decomposition
 ```
 
 ## Architecture
@@ -138,12 +146,12 @@ bash test_scripts/e2e-large-dag.sh    # 5-subtask complex DAG
 ```
 src/
 ├── cli.ts                 CLI entry point, arg parsing, terminal output
-├── taskOrchestrator.ts    Pipeline driver, DAG scheduling, retry loop
+├── taskOrchestrator.ts    Pipeline driver, DAG scheduling, retry loop, recursive decomposition
 ├── claudeRunner.ts        Claude CLI subprocess spawning, output parsing
 ├── stageDefinitions.ts    Built-in Plan/Execute/Verify stage configs
 ├── promptBuilder.ts       Template interpolation, snapshot formatting
 ├── dependencyResolver.ts  Topological sort, cycle detection
-├── taskManager.ts         Lockfile management, task node factory
+├── taskManager.ts         Lockfile management, task node factory, TaskRegistry
 ├── runLogger.ts           Persistent run logging to .claw/runs/
 ├── memoryManager.ts       .claw/memory/ read/write
 └── types.ts               All interfaces and Zod schemas
@@ -155,19 +163,22 @@ See [HUMAN.md](HUMAN.md) for a detailed developer guide, [DATAFLOW.md](DATAFLOW.
 
 **Phase 0: Bootstrap CLI — Complete**
 
-All 10 source modules implemented with 125 unit tests passing. The CLI orchestrator runs end-to-end: plan decomposition, parallel DAG execution, verification with automatic retry, cascade-skip on failure, persistent logging, and memory injection.
+All 10 source modules implemented. The CLI orchestrator runs end-to-end: plan decomposition, parallel DAG execution, verification with automatic retry, cascade-skip on failure, persistent logging, and memory injection.
 
-**Phase 0.5: Validation — In Progress**
+**Phase 1: Recursive Decomposition — Complete**
 
-E2E testing against real Claude Code instances. Core flows verified: dependency resolution, retry logic, cascade-skip, concurrency control, memory injection, and natural language planning.
+Subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators with their own Plan → Execute → Verify pipelines. `TaskRegistry` tracks parent/child relationships. Run logs nest under the parent run directory. 168 unit tests passing.
+
+**E2E Validation — Continuous**
+
+E2E test scripts in `test_scripts/` cover core flows: dependency resolution, retry logic, cascade-skip, concurrency control, memory injection, recursive decomposition, and natural language planning.
 
 ## Roadmap
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | **0** | Bootstrap CLI orchestrator | Done |
-| **0.5** | End-to-end validation | In progress |
-| **1** | Recursive decomposition (subtasks spawn child pipelines) | Not started |
+| **1** | Recursive decomposition (subtasks spawn child pipelines) | Done |
 | **2** | Custom stage definitions via `claw.config.json` | Not started |
 | **3** | Express + WebSocket backend server | Not started |
 | **4** | React frontend with xterm.js terminals | Not started |
