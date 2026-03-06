@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claw UI is a multi-stage recursive orchestration engine for Claude Code. It decomposes tasks into subtasks via a Plan → Execute → Verify pipeline, running subtasks in parallel via DAG scheduling. Currently in Phase 0 (CLI-only bootstrap).
+Claw UI is a multi-stage recursive orchestration engine for Claude Code. It decomposes tasks into subtasks via a Plan → Execute → Verify pipeline, running subtasks in parallel via DAG scheduling. Phase 1 complete: recursive decomposition allows subtasks to spawn child orchestrators with their own Plan/Execute/Verify pipelines.
 
 ## Commands
 
@@ -34,17 +34,19 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 
 **Single execution primitive**: `TaskOrchestrator.runOne()` handles both standalone stages (Plan, Verify) and individual subtasks within parallel stages (Execute). DAG scheduling via `DependencyResolver`.
 
-**Structured output via files**: Agents write JSON to `.claw/tmp/` files. Orchestrator reads and validates via Zod schemas in `claudeRunner.ts`.
+**Recursive decomposition**: When a subtask has `needsRecursiveDecomposition: true`, a child `TaskOrchestrator` is spawned with its own pipeline. Depth is tracked and limited by `maxDepth`. `TaskRegistry` tracks parent/child relationships.
+
+**Structured output via files**: Agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`). Each orchestrator instance gets its own tmp directory, preventing collisions during recursive runs. Orchestrator reads and validates via Zod schemas in `claudeRunner.ts`.
 
 **Key files**:
 - `src/types.ts` — All interfaces and Zod schemas (`PipelineState`, `StageDefinition`, `Plan`, etc.)
 - `src/claudeRunner.ts` — Claude CLI execution, prompt building, output parsing, usage tracking
 - `src/stageDefinitions.ts` — Built-in Plan/Execute/Verify stage configs
-- `src/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, concurrency control
+- `src/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, concurrency control, recursive decomposition
 - `src/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading
 - `src/runLogger.ts` — Persistent logging to `.claw/runs/`
 - `src/memoryManager.ts` — Memory distillation and injection from `.claw/memory/`
-- `src/taskManager.ts` — Lockfile management, task node creation
+- `src/taskManager.ts` — Lockfile management, task node creation, `TaskRegistry` for parent/child tracking
 - `src/promptBuilder.ts` — Template interpolation, snapshot formatting
 - `src/cli.ts` — CLI entry point, arg parsing, terminal output
 
