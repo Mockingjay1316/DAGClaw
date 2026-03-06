@@ -211,11 +211,6 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       if (!state.plan) return '[Plan] No plan generated.';
       const plan = state.plan;
 
-      const cycle = detectCircularDependencies(
-        plan.subtasks.map(s => ({ index: s.index, dependencies: s.dependencies }))
-      );
-      if (cycle) throw new Error(`Circular dependency: ${cycle.join(' → ')}`);
-
       for (const w of detectSharedResourceConflicts(plan.subtasks)) {
         warn(w);
       }
@@ -237,6 +232,12 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     resultHandler: (state, outputFile) => {
       const plan = parseStageOutputFile(PlanSchema, outputFile) as Plan | null;
       if (!plan) return '[Plan] Failed to parse plan output.';
+
+      const cycle = detectCircularDependencies(
+        plan.subtasks.map(s => ({ index: s.index, dependencies: s.dependencies }))
+      );
+      if (cycle) throw new Error(`Circular dependency in plan: ${cycle.join(' → ')}`);
+
       state.plan = plan;
       return `[Plan] Generated plan: ${plan.subtasks.length} subtask(s) — ${plan.summary}`;
     },
