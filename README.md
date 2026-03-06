@@ -48,9 +48,9 @@ node --import tsx bin/claw.js runs --last
    │  Complex subtasks recurse into child pipelines   │
    └────────────────────┬─────────────────────────────┘
                         ▼
-   ┌──────────┐     Mandatory post-stage: reviews all changes,
-   │  Verify  │  →  runs tests, re-executes on failure (up to 3 retries)
-   └──────────┘
+                   ┌──────────┐     Mandatory post-stage: reviews all changes,
+                   │  Verify  │  →  runs tests, re-executes on failure (up to 3 retries)
+                   └──────────┘
 ```
 
 1. **Plan** — A read-only Claude instance analyzes the codebase and produces a structured plan. It knows the available stages (via `--dag-stages`) and assigns each subtask to the appropriate stage. Complex subtasks are marked for recursive decomposition.
