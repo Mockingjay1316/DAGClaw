@@ -51,9 +51,12 @@ function emptyUsage(): RunManifest['usage'] {
 
 export class RunLogger {
   private workDir: string;
+  private parentRunDir?: string;
+  private currentRunId?: string;
 
-  constructor(workDir: string) {
+  constructor(workDir: string, parentRunDir?: string) {
     this.workDir = workDir;
+    this.parentRunDir = parentRunDir;
   }
 
   private clawDir(): string {
@@ -65,7 +68,15 @@ export class RunLogger {
   }
 
   private runDir(runId: string): string {
+    if (this.parentRunDir) {
+      return path.join(this.parentRunDir, 'children', runId);
+    }
     return path.join(this.runsDir(), runId);
+  }
+
+  /** Create a child RunLogger whose runs nest under the given parent run directory. */
+  createChildLogger(parentRunId: string): RunLogger {
+    return new RunLogger(this.workDir, this.runDir(parentRunId));
   }
 
   private manifestPath(runId: string): string {
@@ -95,6 +106,7 @@ export class RunLogger {
     };
 
     this.writeManifest(runId, manifest);
+    this.currentRunId = runId;
     return runId;
   }
 
@@ -242,9 +254,9 @@ ${prompt}
     return summaries;
   }
 
-  /** Clean .claw/tmp/ directory (called before each run). */
+  /** Clean the run-scoped tmp directory (called after initRun). */
   cleanTmp(): void {
-    const tmpDir = path.join(this.clawDir(), 'tmp');
+    const tmpDir = this.tmpDir();
     if (fs.existsSync(tmpDir)) {
       for (const file of fs.readdirSync(tmpDir)) {
         fs.rmSync(path.join(tmpDir, file), { recursive: true, force: true });
@@ -254,11 +266,18 @@ ${prompt}
     }
   }
 
-  /** Get the .claw/tmp/ path for structured output files. */
+  /** Get a run-scoped tmp path for structured output files. */
   tmpPath(filename: string): string {
-    const tmpDir = path.join(this.clawDir(), 'tmp');
+    const tmpDir = this.tmpDir();
     fs.mkdirSync(tmpDir, { recursive: true });
     return path.join(tmpDir, filename);
+  }
+
+  private tmpDir(): string {
+    if (this.currentRunId) {
+      return path.join(this.runDir(this.currentRunId), 'tmp');
+    }
+    return path.join(this.clawDir(), 'tmp');
   }
 
   private writeManifest(runId: string, manifest: RunManifest): void {

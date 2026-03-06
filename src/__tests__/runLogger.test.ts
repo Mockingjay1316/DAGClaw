@@ -230,7 +230,7 @@ describe('RunLogger', () => {
   });
 
   describe('cleanTmp', () => {
-    it('cleans .claw/tmp/ directory', () => {
+    it('falls back to .claw/tmp/ when no run initialized', () => {
       const logger = new RunLogger(tmpDir);
       const tmpClaw = path.join(tmpDir, '.claw', 'tmp');
       fs.mkdirSync(tmpClaw, { recursive: true });
@@ -240,6 +240,68 @@ describe('RunLogger', () => {
 
       assert.ok(fs.existsSync(tmpClaw)); // dir still exists
       assert.equal(fs.readdirSync(tmpClaw).length, 0); // but empty
+    });
+
+    it('uses run-scoped tmp directory after initRun', () => {
+      const logger = new RunLogger(tmpDir);
+      const runId = logger.initRun({
+        prompt: 'test',
+        pipeline: ['Plan'],
+        backend: 'sdk',
+        permissionMode: 'interactive',
+      });
+
+      logger.cleanTmp();
+
+      const runTmp = path.join(tmpDir, '.claw', 'runs', runId, 'tmp');
+      assert.ok(fs.existsSync(runTmp), 'run-scoped tmp dir should exist');
+    });
+
+    it('tmpPath returns run-scoped path after initRun', () => {
+      const logger = new RunLogger(tmpDir);
+      const runId = logger.initRun({
+        prompt: 'test',
+        pipeline: ['Plan'],
+        backend: 'sdk',
+        permissionMode: 'interactive',
+      });
+
+      const outputPath = logger.tmpPath('plan.json');
+      const expected = path.join(tmpDir, '.claw', 'runs', runId, 'tmp', 'plan.json');
+      assert.equal(outputPath, expected);
+    });
+
+    it('parent and child loggers use separate tmp directories', () => {
+      const parentLogger = new RunLogger(tmpDir);
+      const parentRunId = parentLogger.initRun({
+        prompt: 'parent',
+        pipeline: ['Plan', 'Execute'],
+        backend: 'sdk',
+        permissionMode: 'interactive',
+      });
+
+      const childLogger = parentLogger.createChildLogger(parentRunId);
+      const childRunId = childLogger.initRun({
+        prompt: 'child',
+        pipeline: ['Plan', 'Execute'],
+        backend: 'sdk',
+        permissionMode: 'interactive',
+      });
+
+      const parentTmp = parentLogger.tmpPath('subtask-0-summary.json');
+      const childTmp = childLogger.tmpPath('subtask-0-summary.json');
+
+      // Same filename but different directories
+      assert.notEqual(parentTmp, childTmp);
+      assert.ok(parentTmp.includes(parentRunId));
+      assert.ok(childTmp.includes(childRunId));
+
+      // Writing to one doesn't affect the other
+      fs.writeFileSync(parentTmp, '{"parent": true}');
+      fs.writeFileSync(childTmp, '{"child": true}');
+
+      assert.equal(JSON.parse(fs.readFileSync(parentTmp, 'utf-8')).parent, true);
+      assert.equal(JSON.parse(fs.readFileSync(childTmp, 'utf-8')).child, true);
     });
   });
 });
