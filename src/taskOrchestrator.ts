@@ -246,8 +246,7 @@ export class TaskOrchestrator {
   /** Display stage result and prompt for approval. */
   private async requestApproval(stage: StageDefinition, state: PipelineState): Promise<boolean> {
     if (stage.approvalFormatter) {
-      const display = stage.approvalFormatter(state, (w) => this.warn(`[${stage.name}] ${w}`));
-      this.status(display);
+      this.status(stage.approvalFormatter(state));
     }
 
     const ok = await this.cb.onApprovalRequest?.(`\n  Approve ${stage.name.toLowerCase()}? (y/n): `);

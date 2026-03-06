@@ -207,17 +207,11 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     outputSchema: PlanSchema,
     approvalRequired: true,
 
-    approvalFormatter: (state, warn) => {
+    approvalFormatter: (state) => {
       if (!state.plan) return '[Plan] No plan generated.';
-      const plan = state.plan;
-
-      for (const w of detectSharedResourceConflicts(plan.subtasks)) {
-        warn(w);
-      }
-
-      let display = formatPlanForDisplay(plan);
-      if (plan.qualityFlag) {
-        display += `\n\n  [Quality] ${plan.qualityFlag.message}`;
+      let display = formatPlanForDisplay(state.plan);
+      if (state.plan.qualityFlag) {
+        display += `\n\n  [Quality] ${state.plan.qualityFlag.message}`;
       }
       return display;
     },
@@ -238,8 +232,14 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       );
       if (cycle) throw new Error(`Circular dependency in plan: ${cycle.join(' → ')}`);
 
+      const conflicts = detectSharedResourceConflicts(plan.subtasks);
+
       state.plan = plan;
-      return `[Plan] Generated plan: ${plan.subtasks.length} subtask(s) — ${plan.summary}`;
+      let msg = `[Plan] Generated plan: ${plan.subtasks.length} subtask(s) — ${plan.summary}`;
+      for (const w of conflicts) {
+        msg += `\n[Plan] Warning: ${w}`;
+      }
+      return msg;
     },
 
     formatStatus: () => '[Plan] Running...',
