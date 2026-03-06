@@ -39,7 +39,6 @@ export function parseUsageFromCliOutput(output: string): UsageStats {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     estimatedCost: 0,
-    durationMs: 0,
   };
 
   try {
@@ -51,7 +50,6 @@ export function parseUsageFromCliOutput(output: string): UsageStats {
       cacheReadTokens: usage.cache_read_input_tokens ?? 0,
       cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
       estimatedCost: 0,
-      durationMs: 0,
     };
     stats.estimatedCost = estimateCost(
       stats.inputTokens,

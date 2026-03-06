@@ -128,7 +128,6 @@ describe('aggregateUsage', () => {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     estimatedCost: 0.01,
-    durationMs: 1000,
   });
 
   it('sums token counts across multiple UsageStats', () => {
@@ -138,11 +137,10 @@ describe('aggregateUsage', () => {
     assert.equal(total.outputTokens, 150);
   });
 
-  it('sums costs and durations', () => {
+  it('sums costs', () => {
     const stats = [makeUsage(100, 50), makeUsage(200, 100)];
     const total = aggregateUsage(stats);
     assert.equal(total.estimatedCost, 0.02);
-    assert.equal(total.durationMs, 2000);
   });
 
   it('returns zeros for empty array', () => {

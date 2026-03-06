@@ -100,7 +100,7 @@ export function detectSharedResourceConflicts(
 export function aggregateUsage(stats: UsageStats[]): UsageStats {
   const total: UsageStats = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
-    cacheCreationTokens: 0, estimatedCost: 0, durationMs: 0,
+    cacheCreationTokens: 0, estimatedCost: 0,
   };
   for (const s of stats) {
     total.inputTokens += s.inputTokens;
@@ -108,7 +108,6 @@ export function aggregateUsage(stats: UsageStats[]): UsageStats {
     total.cacheReadTokens += s.cacheReadTokens;
     total.cacheCreationTokens += s.cacheCreationTokens;
     total.estimatedCost += s.estimatedCost;
-    total.durationMs += s.durationMs;
   }
   return total;
 }
@@ -176,7 +175,7 @@ export class TaskOrchestrator {
 
     const state: PipelineState = {
       prompt: this.opts.prompt, workDir: this.opts.workDir,
-      plan: null, subtaskSnapshots: new Map(), skippedIndices: [],
+      plan: null, subtaskSnapshots: new Map(), skippedIndices: new Set(),
       memoryContext: this.opts.noMemory ? '' : this.memory.buildContextBlock(),
       verification: null,
     };
@@ -215,14 +214,14 @@ export class TaskOrchestrator {
           const result = await this.retryLoop(runId, stage, state);
           if (!result) {
             this.logger.updateManifestStatus(runId, 'failed');
-            this.printCostSummary(runId);
+            if (!this.opts.noSummary) this.printCostSummary(runId);
             return { runId, success: false };
           }
         }
       }
 
       this.logger.updateManifestStatus(runId, 'completed');
-      this.printCostSummary(runId);
+      if (!this.opts.noSummary) this.printCostSummary(runId);
       return { runId, success: true };
     } catch (err) {
       this.logger.updateManifestStatus(runId, 'failed');
@@ -304,11 +303,11 @@ export class TaskOrchestrator {
           const reason = (results[i] as PromiseRejectedResult).reason;
           this.status(`[${stage.name}] [${idx}] Failed: ${reason?.message || 'unknown'}`);
           resolver.markSkipped(idx);
-          state.skippedIndices.push(idx);
+          state.skippedIndices.add(idx);
           // Report cascade
           for (const s of subtasks) {
-            if (resolver.isSkipped(s.index) && s.index !== idx && !state.skippedIndices.includes(s.index)) {
-              state.skippedIndices.push(s.index);
+            if (resolver.isSkipped(s.index) && s.index !== idx && !state.skippedIndices.has(s.index)) {
+              state.skippedIndices.add(s.index);
               this.status(`[${stage.name}] [${s.index}] Skipped (cascade from ${idx})`);
             }
           }
@@ -415,7 +414,7 @@ export class TaskOrchestrator {
       this.status('\n--- Cost Summary ---');
       this.status(`  Input tokens:  ${m.usage.totalInputTokens.toLocaleString()}`);
       this.status(`  Output tokens: ${m.usage.totalOutputTokens.toLocaleString()}`);
-      this.status(`  Cache tokens:  ${m.usage.totalCacheTokens.toLocaleString()}`);
+      this.status(`  Cache tokens:  ${m.usage.totalCacheReadTokens.toLocaleString()}`);
       this.status(`  Estimated cost: $${m.usage.estimatedCost.toFixed(4)}`);
       if (m.duration) this.status(`  Duration: ${(m.duration / 1000).toFixed(1)}s`);
     } catch { /* best effort */ }

@@ -15,7 +15,6 @@ function makeUsageStats(overrides?: Partial<UsageStats>): UsageStats {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     estimatedCost: 0.01,
-    durationMs: 1000,
     ...overrides,
   };
 }

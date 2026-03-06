@@ -146,7 +146,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       return `[Plan] Generated plan: ${plan.subtasks.length} subtask(s) — ${plan.summary}`;
     },
 
-    formatStatus: (_subtask, status) => `[Plan] ${status ?? 'Running...'}`,
+    formatStatus: () => '[Plan] Running...',
   },
 
   Execute: {
@@ -198,8 +198,8 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       return `[Execute] [${idx}] Done: ${snap.oneliner || '(completed)'}`;
     },
 
-    formatStatus: (subtask, status) =>
-      `[Execute] [${subtask?.index ?? '?'}] ${status ?? 'Running...'}`,
+    formatStatus: (subtask) =>
+      `[Execute] [${subtask?.index ?? '?'}] Running...`,
   },
 
   Verify: {
@@ -219,7 +219,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
         workDir: state.workDir,
         planSummary: state.plan?.summary ?? '(no plan)',
         subtaskSummaries: summaries,
-        skippedIndices: state.skippedIndices.length > 0 ? state.skippedIndices.join(', ') : 'none',
+        skippedIndices: state.skippedIndices.size > 0 ? Array.from(state.skippedIndices).join(', ') : 'none',
         outputFile,
       };
     },
@@ -236,10 +236,9 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
 
     resultInterpreter: verifyResultInterpreter,
     retryStage: 'Execute',
-    integrationVerifier: true,
     maxRetries: 2,
 
-    formatStatus: (_subtask, status) => `[Verify] ${status ?? 'Running...'}`,
+    formatStatus: () => '[Verify] Running...',
   },
 };
 

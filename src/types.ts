@@ -17,7 +17,6 @@ export interface UsageStats {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   estimatedCost: number;
-  durationMs: number;
 }
 
 // --- Context ---
@@ -30,10 +29,6 @@ export interface ContextSnapshot {
   filesModified: string[];
   summary: string;
   sessionId: string;
-}
-
-export interface ContextBudget {
-  maxContextChars: number; // rough: chars / 4 ~ tokens
 }
 
 // --- Plan ---
@@ -133,7 +128,7 @@ export interface PipelineState {
   workDir: string;
   plan: Plan | null;
   subtaskSnapshots: Map<number, ContextSnapshot>;
-  skippedIndices: number[];
+  skippedIndices: Set<number>;
   memoryContext: string;
   verification: VerificationResult | null;
 }
@@ -165,10 +160,9 @@ export interface StageDefinition {
   };
   /** Stage name to re-run for failed subtasks (e.g., "Execute"). */
   retryStage?: string;
-  integrationVerifier?: boolean;
   maxRetries?: number;
   /** Format a status line for this stage/subtask. */
-  formatStatus?: (subtask?: SubtaskDefinition, status?: string) => string;
+  formatStatus?: (subtask?: SubtaskDefinition) => string;
 }
 
 // --- Task Node ---
@@ -215,7 +209,7 @@ export interface RunManifest {
   usage: {
     totalInputTokens: number;
     totalOutputTokens: number;
-    totalCacheTokens: number;
+    totalCacheReadTokens: number;
     estimatedCost: number;
     perStage: Record<string, UsageStats>;
     perSubtask: Record<number, UsageStats>;

@@ -22,32 +22,28 @@ describe('stageDefinitions', () => {
       assert.equal(BUILTIN_STAGES.Execute.parallel, true);
     });
 
-    it('Verify stage has integrationVerifier=true', () => {
-      assert.equal(BUILTIN_STAGES.Verify.integrationVerifier, true);
-    });
-
     it('Plan prompt instructs read-only behavior', () => {
-      const prompt = BUILTIN_STAGES.Plan.runnerConfig.systemPrompt!;
+      const prompt = BUILTIN_STAGES.Plan.runnerConfig.systemPrompt;
       assert.ok(prompt.includes('do not modify'));
     });
 
     it('Plan prompt instructs shared resource serialization', () => {
-      const prompt = BUILTIN_STAGES.Plan.runnerConfig.systemPrompt!;
+      const prompt = BUILTIN_STAGES.Plan.runnerConfig.systemPrompt;
       assert.ok(prompt.includes('sequential') || prompt.includes('dependency'));
     });
 
     it('Plan prompt instructs quality evaluation', () => {
-      const prompt = BUILTIN_STAGES.Plan.runnerConfig.systemPrompt!;
+      const prompt = BUILTIN_STAGES.Plan.runnerConfig.systemPrompt;
       assert.ok(prompt.includes('qualityFlag') || prompt.includes('quality'));
     });
 
     it('Execute prompt asks for summary output', () => {
-      const prompt = BUILTIN_STAGES.Execute.runnerConfig.systemPrompt!;
+      const prompt = BUILTIN_STAGES.Execute.runnerConfig.systemPrompt;
       assert.ok(prompt.includes('summary'));
     });
 
     it('Verify prompt instructs independent test generation', () => {
-      const prompt = BUILTIN_STAGES.Verify.runnerConfig.systemPrompt!;
+      const prompt = BUILTIN_STAGES.Verify.runnerConfig.systemPrompt;
       assert.ok(prompt.includes('test'));
     });
   });

@@ -42,7 +42,7 @@ function emptyUsage(): RunManifest['usage'] {
   return {
     totalInputTokens: 0,
     totalOutputTokens: 0,
-    totalCacheTokens: 0,
+    totalCacheReadTokens: 0,
     estimatedCost: 0,
     perStage: {},
     perSubtask: {},
@@ -284,7 +284,7 @@ ${prompt}
     }
     manifest.usage.totalInputTokens = input;
     manifest.usage.totalOutputTokens = output;
-    manifest.usage.totalCacheTokens = cache;
+    manifest.usage.totalCacheReadTokens = cache;
     manifest.usage.estimatedCost = cost;
   }
 }
