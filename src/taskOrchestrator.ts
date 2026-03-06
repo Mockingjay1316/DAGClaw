@@ -9,6 +9,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   CliOptions,
+  Plan,
+  Subtask,
   PipelineState,
   SubtaskDefinition,
   StageDefinition,
@@ -44,6 +46,32 @@ export function isGitRepo(dir: string): boolean {
   return existsSync(join(dir, '.git'));
 }
 
+/** Check if a subtask needs recursive decomposition. */
+export function shouldRecurse(subtaskIndex: number, plan: Plan): boolean {
+  return plan.subtasks.find(s => s.index === subtaskIndex)?.needsRecursiveDecomposition === true;
+}
+
+/** Build CliOptions for a child recursive task from a parent's options and subtask. */
+export function buildChildOptions(parentOpts: CliOptions, subtask: Subtask, currentDepth: number): CliOptions {
+  if (currentDepth >= parentOpts.maxDepth) {
+    throw new Error(`Max recursion depth (${parentOpts.maxDepth}) reached`);
+  }
+  return {
+    prompt: subtask.prompt,
+    workDir: parentOpts.workDir,
+    pipeline: ['Plan', 'Execute', 'Verify'],
+    backend: parentOpts.backend,
+    permissionMode: parentOpts.permissionMode,
+    autoApprove: true,
+    maxRetries: parentOpts.maxRetries,
+    maxConcurrency: parentOpts.maxConcurrency,
+    maxDepth: parentOpts.maxDepth,
+    timeoutSeconds: parentOpts.timeoutSeconds,
+    noSummary: true,
+    noMemory: parentOpts.noMemory,
+  };
+}
+
 /** Get files modified since last commit (unstaged + staged). */
 export function getFilesModifiedByGit(dir: string): string[] {
   try {
@@ -72,12 +100,16 @@ export class TaskOrchestrator {
   private memory: MemoryManager;
   private cb: OrchestratorCallbacks;
   private isShuttingDown = false;
+  private depth: number;
+  private isChild: boolean;
 
-  constructor(opts: CliOptions, cb: OrchestratorCallbacks = {}) {
+  constructor(opts: CliOptions, cb: OrchestratorCallbacks = {}, depth: number = 0, logger?: RunLogger) {
     this.opts = opts;
-    this.logger = new RunLogger(opts.workDir);
+    this.logger = logger ?? new RunLogger(opts.workDir);
     this.memory = new MemoryManager(opts.workDir);
     this.cb = cb;
+    this.depth = depth;
+    this.isChild = depth > 0;
   }
 
   private status(msg: string) { this.cb.onStatus?.(msg); }
@@ -85,8 +117,10 @@ export class TaskOrchestrator {
 
   /** Run the full pipeline. */
   async run(): Promise<{ runId: string; success: boolean }> {
-    const stale = checkStaleLock(this.opts.workDir);
-    if (stale) this.warn(`Cleaned up stale lock from PID ${stale.pid}`);
+    if (!this.isChild) {
+      const stale = checkStaleLock(this.opts.workDir);
+      if (stale) this.warn(`Cleaned up stale lock from PID ${stale.pid}`);
+    }
 
     if (this.opts.backend.type === 'cli' && !checkClaudeCli()) {
       throw new Error('Claude Code CLI not found. Install from https://docs.anthropic.com/claude-code');
@@ -97,7 +131,7 @@ export class TaskOrchestrator {
       prompt: this.opts.prompt, pipeline: this.opts.pipeline,
       backend: this.opts.backend.type, permissionMode: this.opts.permissionMode, gitInfo,
     });
-    acquireLock(this.opts.workDir, runId);
+    if (!this.isChild) acquireLock(this.opts.workDir, runId);
     this.logger.cleanTmp();
 
     const state: PipelineState = {
@@ -154,7 +188,7 @@ export class TaskOrchestrator {
       this.logger.updateManifestStatus(runId, 'failed');
       throw err;
     } finally {
-      releaseLock(this.opts.workDir);
+      if (!this.isChild) releaseLock(this.opts.workDir);
     }
   }
 
@@ -223,7 +257,12 @@ export class TaskOrchestrator {
 
       const batch = ready.slice(0, this.opts.maxConcurrency);
       const results = await Promise.allSettled(
-        batch.map(idx => this.runOne(runId, stage, state, byIndex.get(idx)!))
+        batch.map(idx => {
+          if (shouldRecurse(idx, state.plan!)) {
+            return this.runRecursive(runId, stage, state, byIndex.get(idx)!);
+          }
+          return this.runOne(runId, stage, state, byIndex.get(idx)!);
+        })
       );
 
       for (let i = 0; i < batch.length; i++) {
@@ -243,6 +282,42 @@ export class TaskOrchestrator {
         }
       }
     }
+  }
+
+  /** Recursively decompose a subtask by spawning a child orchestrator. */
+  private async runRecursive(
+    runId: string,
+    stage: StageDefinition,
+    state: PipelineState,
+    subtask: SubtaskDefinition,
+  ): Promise<string> {
+    const idx = subtask.index;
+    this.status(`[${stage.name}] [${idx}] Recursively decomposing (depth ${this.depth + 1})...`);
+
+    const planSubtask = state.plan!.subtasks.find(s => s.index === idx)!;
+    const childOpts = buildChildOptions(this.opts, planSubtask, this.depth);
+    const childLogger = this.logger.createChildLogger(runId);
+    const child = new TaskOrchestrator(childOpts, this.cb, this.depth + 1, childLogger);
+
+    const result = await child.run();
+
+    if (!result.success) {
+      throw new Error(`Recursive subtask ${idx} failed (child run ${result.runId})`);
+    }
+
+    // Record a ContextSnapshot for the completed recursive subtask
+    const snapshot = {
+      nodeId: result.runId,
+      stage: stage.name,
+      subtaskIndex: idx,
+      oneliner: `Subtask ${idx} completed via recursive decomposition`,
+      filesModified: [],
+      summary: `Subtask ${idx} completed via recursive decomposition (depth ${this.depth + 1})`,
+      sessionId: result.runId,
+    };
+    state.subtaskSnapshots.set(idx, snapshot);
+
+    return `[${stage.name}] [${idx}] Recursive decomposition complete.`;
   }
 
   /** Display stage result and prompt for approval. */

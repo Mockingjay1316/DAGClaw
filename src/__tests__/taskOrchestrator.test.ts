@@ -4,12 +4,15 @@ import {
   aggregateUsage,
   getFilesModifiedByGit,
   isGitRepo,
+  shouldRecurse,
+  buildChildOptions,
 } from '../taskOrchestrator.ts';
 import {
   formatPlanForDisplay,
   detectSharedResourceConflicts,
 } from '../stageDefinitions.ts';
-import type { Plan, UsageStats } from '../types.ts';
+import { createTaskNode, TaskRegistry } from '../taskManager.ts';
+import type { Plan, Subtask, UsageStats, CliOptions } from '../types.ts';
 
 // --- formatPlanForDisplay ---
 
@@ -172,5 +175,244 @@ describe('getFilesModifiedByGit', () => {
     const files = getFilesModifiedByGit(process.cwd());
     assert.ok(Array.isArray(files));
     for (const f of files) assert.equal(typeof f, 'string');
+  });
+});
+
+// --- shouldRecurse ---
+
+describe('shouldRecurse', () => {
+  const makePlan = (subtasks: Plan['subtasks']): Plan => ({
+    summary: 'Test plan',
+    subtasks,
+    worthDistilling: false,
+  });
+
+  const makeSubtask = (index: number, needsRecursive: boolean): Subtask => ({
+    index,
+    description: `Subtask ${index}`,
+    prompt: `Do subtask ${index}`,
+    dependencies: [],
+    estimatedComplexity: 'medium',
+    needsRecursiveDecomposition: needsRecursive,
+  });
+
+  it('returns true when subtask has needsRecursiveDecomposition: true', () => {
+    const plan = makePlan([makeSubtask(0, true)]);
+    assert.equal(shouldRecurse(0, plan), true);
+  });
+
+  it('returns false when subtask has needsRecursiveDecomposition: false', () => {
+    const plan = makePlan([makeSubtask(0, false)]);
+    assert.equal(shouldRecurse(0, plan), false);
+  });
+
+  it('returns false for an out-of-bounds index', () => {
+    const plan = makePlan([makeSubtask(0, true)]);
+    assert.equal(shouldRecurse(5, plan), false);
+  });
+});
+
+// --- buildChildOptions ---
+
+describe('buildChildOptions', () => {
+  const parentOpts: CliOptions = {
+    prompt: 'Build the whole app',
+    workDir: '/home/user/project',
+    pipeline: ['Plan', 'Execute', 'Verify'],
+    backend: { type: 'cli' },
+    permissionMode: 'auto',
+    autoApprove: false,
+    maxRetries: 2,
+    maxConcurrency: 4,
+    maxDepth: 3,
+    timeoutSeconds: 300,
+    noSummary: false,
+    noMemory: false,
+  };
+
+  const subtask: Subtask = {
+    index: 0,
+    description: 'Set up database layer',
+    prompt: 'Create the database schema and ORM models',
+    dependencies: [],
+    estimatedComplexity: 'high',
+    needsRecursiveDecomposition: true,
+  };
+
+  it('sets prompt to the subtask prompt', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal(child.prompt, subtask.prompt);
+  });
+
+  it('keeps the same workDir, backend, and permissionMode', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal(child.workDir, parentOpts.workDir);
+    assert.deepEqual(child.backend, parentOpts.backend);
+    assert.equal(child.permissionMode, parentOpts.permissionMode);
+  });
+
+  it('uses the same pipeline (Plan/Execute/Verify)', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.deepEqual(child.pipeline, ['Plan', 'Execute', 'Verify']);
+  });
+
+  it('sets maxDepth to parentOpts.maxDepth (unchanged)', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal(child.maxDepth, parentOpts.maxDepth);
+  });
+
+  it('sets autoApprove to true for child tasks', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal(child.autoApprove, true);
+  });
+
+  it('sets noSummary to true for child tasks', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal(child.noSummary, true);
+  });
+
+  it('preserves maxConcurrency, timeoutSeconds, and maxRetries', () => {
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal(child.maxConcurrency, parentOpts.maxConcurrency);
+    assert.equal(child.timeoutSeconds, parentOpts.timeoutSeconds);
+    assert.equal(child.maxRetries, parentOpts.maxRetries);
+  });
+
+  it('throws if currentDepth >= parentOpts.maxDepth', () => {
+    assert.throws(
+      () => buildChildOptions(parentOpts, subtask, 3),
+      { message: /Max recursion depth \(3\) reached/ },
+    );
+    assert.throws(
+      () => buildChildOptions(parentOpts, subtask, 5),
+      { message: /Max recursion depth \(3\) reached/ },
+    );
+  });
+});
+
+// --- TaskRegistry integration ---
+
+describe('TaskRegistry integration', () => {
+  it('creates a parent node and adds a child via registry', () => {
+    const registry = new TaskRegistry();
+    const parent = createTaskNode({
+      prompt: 'Build the app',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.register(parent);
+
+    const child = createTaskNode({
+      prompt: 'Set up database',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.addChild(parent.id, child);
+
+    // Child should have parentId set
+    assert.equal(child.parentId, parent.id);
+    // Parent should list child in children array
+    assert.ok(parent.children.includes(child.id));
+    // Registry should return the child
+    assert.equal(registry.getNode(child.id)?.id, child.id);
+  });
+
+  it('reports correct depth for parent and child nodes', () => {
+    const registry = new TaskRegistry();
+    const root = createTaskNode({
+      prompt: 'Root task',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.register(root);
+
+    const child = createTaskNode({
+      prompt: 'Child task',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.addChild(root.id, child);
+
+    const grandchild = createTaskNode({
+      prompt: 'Grandchild task',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.addChild(child.id, grandchild);
+
+    assert.equal(registry.getDepth(root.id), 0);
+    assert.equal(registry.getDepth(child.id), 1);
+    assert.equal(registry.getDepth(grandchild.id), 2);
+  });
+
+  it('getChildren returns direct children only', () => {
+    const registry = new TaskRegistry();
+    const root = createTaskNode({
+      prompt: 'Root',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.register(root);
+
+    const child1 = createTaskNode({
+      prompt: 'Child 1',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    const child2 = createTaskNode({
+      prompt: 'Child 2',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.addChild(root.id, child1);
+    registry.addChild(root.id, child2);
+
+    const grandchild = createTaskNode({
+      prompt: 'Grandchild',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.addChild(child1.id, grandchild);
+
+    const children = registry.getChildren(root.id);
+    assert.equal(children.length, 2);
+    assert.ok(children.some(c => c.id === child1.id));
+    assert.ok(children.some(c => c.id === child2.id));
+    // Grandchild should NOT be in direct children
+    assert.ok(!children.some(c => c.id === grandchild.id));
+  });
+
+  it('checkDepthLimit returns true when depth would exceed maxDepth', () => {
+    const registry = new TaskRegistry();
+    const root = createTaskNode({
+      prompt: 'Root',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.register(root);
+
+    const child = createTaskNode({
+      prompt: 'Child',
+      workDir: '/tmp/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      permissionMode: 'auto',
+    });
+    registry.addChild(root.id, child);
+
+    // root is depth 0, child is depth 1
+    // Adding to child would be depth 2. maxDepth=2 → should be at limit
+    assert.equal(registry.checkDepthLimit(child.id, 2), true);
+    // maxDepth=3 → still room
+    assert.equal(registry.checkDepthLimit(child.id, 3), false);
   });
 });
