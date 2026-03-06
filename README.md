@@ -59,6 +59,7 @@ Options:
   --workdir <path>         Working directory (default: current dir)
   --backend cli|sdk        Claude backend (default: cli)
   --pipeline <stages>      Comma-separated stage names (default: Plan,Execute,Verify)
+  --dag-stages <stages>    Stages available for DAG subtask assignment (default: Execute)
   --max-concurrency <n>    Max parallel subtasks (default: 3)
   --timeout <seconds>      Per-stage timeout (default: 300)
   --yolo                   Full auto mode: skip plan approval, auto permissions
@@ -121,7 +122,7 @@ Every run is persisted to `.claw/runs/<run-id>/`:
 ## Development
 
 ```bash
-# Run unit tests (168 tests, zero deps test runner)
+# Run unit tests (213 tests, zero deps test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -149,6 +150,7 @@ src/
 ├── taskOrchestrator.ts    Pipeline driver, DAG scheduling, retry loop, recursive decomposition
 ├── claudeRunner.ts        Claude CLI subprocess spawning, output parsing
 ├── stageDefinitions.ts    Built-in Plan/Execute/Verify stage configs
+├── configLoader.ts        Custom stage loading from claw.config.json/.ts
 ├── promptBuilder.ts       Template interpolation, snapshot formatting
 ├── dependencyResolver.ts  Topological sort, cycle detection
 ├── taskManager.ts         Lockfile management, task node factory, TaskRegistry
@@ -167,7 +169,11 @@ All 10 source modules implemented. The CLI orchestrator runs end-to-end: plan de
 
 **Phase 1: Recursive Decomposition — Complete**
 
-Subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators with their own Plan → Execute → Verify pipelines. `TaskRegistry` tracks parent/child relationships. Run logs nest under the parent run directory. 168 unit tests passing.
+Subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators with their own Plan → Execute → Verify pipelines. `TaskRegistry` tracks parent/child relationships. Run logs nest under the parent run directory.
+
+**Phase 2: Custom Stages & Pipeline-Aware Planning — Complete**
+
+Custom stages via `claw.config.json`/`.ts`. Per-subtask stage routing in the DAG — the planner can assign different stages (Execute, Lint, Verify, custom) to different subtasks. System prompt interpolation enables injecting pipeline metadata (DAG palette, post-stages) into the planner. `--dag-stages` CLI flag controls which stages the planner can use. 213 unit tests passing.
 
 **E2E Validation — Continuous**
 
@@ -179,7 +185,7 @@ E2E test scripts in `test_scripts/` cover core flows: dependency resolution, ret
 |-------|-------------|--------|
 | **0** | Bootstrap CLI orchestrator | Done |
 | **1** | Recursive decomposition (subtasks spawn child pipelines) | Done |
-| **2** | Custom stage definitions via `claw.config.json` | Not started |
+| **2** | Custom stages, pipeline-aware planning, per-subtask stage routing | Done |
 | **3** | Express + WebSocket backend server | Not started |
 | **4** | React frontend with xterm.js terminals | Not started |
 | **5** | Polish, error handling, responsive UI | Not started |

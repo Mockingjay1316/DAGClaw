@@ -84,12 +84,15 @@ TaskOrchestrator.run()
 │     │ skippedIndices: Set<number>  ← set by DAG runner     │
 │     │ memoryContext: string        ← from MemoryManager    │
 │     │ verification: VerResult|null ← set by Verify stage   │
+│     │ dagPalette: string[]         ← from CliOptions       │
+│     │ postStages: string[]         ← derived from pipeline │
+│     │ stageDescriptions: string    ← formatted palette     │
 │     └──────────────────────────────────────────────────────┘
 │
 ├─ 8. FOR EACH stage in pipeline:
 │     │
-│     ├─ getStageDefinition(stageName)
-│     │    → returns StageDefinition (from BUILTIN_STAGES)
+│     ├─ getStageDefinition(stageName, stageRegistry?)
+│     │    → returns StageDefinition (from registry or BUILTIN_STAGES)
 │     │
 │     ├─ IF stage.parallel && stage.subtaskExtractor:
 │     │    subtasks = stage.subtaskExtractor(state)
@@ -123,12 +126,14 @@ runOne(runId, stage, state, subtask?)
 ├─ 2. stage.contextBuilder(state, outputFile, subtask?)
 │     │
 │     │  Plan returns:
-│     │  ┌──────────────────────────────────────┐
-│     │  │ workDir: "/path/to/project"          │
-│     │  │ prompt: "Build a CLI tool..."        │
-│     │  │ memoryContext: "--- Memory ---\n..." │
-│     │  │ outputFile: ".claw/runs/<id>/tmp/plan.json" │
-│     │  └──────────────────────────────────────┘
+│     │  ┌──────────────────────────────────────────────────────┐
+│     │  │ workDir: "/path/to/project"                          │
+│     │  │ prompt: "Build a CLI tool..."                        │
+│     │  │ memoryContext: "--- Memory ---\n..."                 │
+│     │  │ outputFile: ".claw/runs/<id>/tmp/plan.json"          │
+│     │  │ dagPaletteDescriptions: "- Execute: ... (tools: all)"│
+│     │  │ postStagesDescription: "- Verify"                    │
+│     │  └──────────────────────────────────────────────────────┘
 │     │
 │     │  Execute returns:
 │     │  ┌────────────────────────────────────────────────────────┐
@@ -153,8 +158,8 @@ runOne(runId, stage, state, subtask?)
 │     │
 │     → returns Record<string, string>  (template variables)
 │
-├─ 3. buildStagePrompt(template, context)
-│     │  interpolates {{placeholders}} in promptTemplate
+├─ 3. buildStagePrompt(template, context) — for BOTH systemPrompt AND promptTemplate
+│     │  interpolates {{placeholders}} (e.g., {{dagPaletteDescriptions}})
 │     → returns assembled prompt string
 │
 ├─ 4. logger.logStagePrompt(runId, stageName, prompt, systemPrompt, subtaskIndex?)
@@ -253,8 +258,13 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │    │
 │    ├─ batch = ready.slice(0, maxConcurrency)
 │    │
+│    ├─ Per-subtask stage resolution:
+│    │   subtask.stage? → getStageDefinition(subtask.stage, registry)
+│    │   else           → use parent stage (Execute)
+│    │
 │    ├─ Promise.allSettled(batch.map(runOne or runRecursive))
 │    │   → runs subtasks in parallel up to maxConcurrency
+│    │   → each subtask uses its resolved effectiveStage
 │    │   → if shouldRecurse(idx, plan): spawns child orchestrator
 │    │
 │    └─ FOR each result:
@@ -355,7 +365,8 @@ Agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`). The orches
       "prompt": "string",
       "dependencies": [1, 2],
       "estimatedComplexity": "low" | "medium" | "high",
-      "needsRecursiveDecomposition": false
+      "needsRecursiveDecomposition": false,
+      "stage": "Execute"
     }
   ],
   "qualityFlag": {"concern": "vague", "message": "...", "suggestion": "..."} | null,

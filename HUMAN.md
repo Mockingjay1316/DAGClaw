@@ -14,6 +14,7 @@ src/
 ├── taskOrchestrator.ts    The engine. Drives stages, schedules DAGs, handles retries.
 ├── claudeRunner.ts        Spawns `claude -p` subprocesses, parses output, tracks cost.
 ├── stageDefinitions.ts    Stage configs: Plan, Execute, Verify. All stage-specific logic lives here.
+├── configLoader.ts        Custom stage loading from claw.config.json/.ts, merging with builtins.
 ├── promptBuilder.ts       Template interpolation and snapshot formatting.
 ├── dependencyResolver.ts  Topological sort for the subtask DAG.
 ├── taskManager.ts         Lockfile management and task node factory.
@@ -33,6 +34,9 @@ A mutable object that flows through every stage. Each stage reads what it needs 
 - `verification` — set by Verify, read by the retry loop
 - `memoryContext` — loaded once at the start from `.claw/memory/`
 - `skippedIndices` — accumulated by the DAG runner when subtasks fail
+- `dagPalette` — stages available for DAG subtask assignment (from `--dag-stages`)
+- `postStages` — mandatory stages after DAG (derived from pipeline)
+- `stageDescriptions` — formatted palette descriptions injected into Plan system prompt
 
 ### StageDefinition
 
@@ -84,12 +88,11 @@ Read this first. Everything else depends on it.
 
 ### `cli.ts` — Entry Point
 
-Small file. Three responsibilities:
-1. `parseArgs()` — converts argv into `CliOptions`
+Small file. Four responsibilities:
+1. `parseArgs()` — converts argv into `CliOptions` (including `--dag-stages`)
 2. `handleRuns()` — `claw runs` subcommand, reads run history from disk
-3. `main()` — creates `TaskOrchestrator`, wires callbacks for terminal I/O, calls `run()`
-
-The callbacks (`onStatus`, `onWarning`, `onApprovalRequest`) are how the orchestrator communicates back to the CLI without depending on it.
+3. `main()` — loads custom stages via `loadAndMergeStages()`, validates pipeline against registry, creates `TaskOrchestrator`, calls `run()`
+4. Terminal I/O callbacks (`onStatus`, `onWarning`, `onApprovalRequest`)
 
 ### `taskOrchestrator.ts` — The Engine
 
@@ -105,6 +108,7 @@ The most complex file. Has one class (`TaskOrchestrator`) and several utility fu
 
 **`runOne(stage, state, subtask?)`** — the single execution primitive:
 - Builds the prompt from stage config + pipeline state
+- Interpolates both `systemPrompt` and `promptTemplate` with `{{key}}` placeholders from `contextBuilder`
 - Logs the prompt to disk (for debugging)
 - Spawns Claude via `runClaudeCli()`
 - Logs usage and raw output
@@ -116,6 +120,7 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 **`runDAG(stage, state, subtasks)`** — parallel execution:
 - Creates a `DependencyResolver` from the subtask list
 - Loops: get ready subtasks → batch up to maxConcurrency → `Promise.allSettled(runOne or runRecursive)` → mark complete/skipped
+- **Per-subtask stage routing**: if `subtask.stage` is set, resolves the stage definition from the registry; otherwise falls back to the parent stage (Execute)
 - If `shouldRecurse(index, plan)` is true, calls `runRecursive()` instead of `runOne()`
 - On failure: `markSkipped()` cascades to all downstream dependents and returns the cascaded indices
 
@@ -156,20 +161,20 @@ Pure functions + one async executor. No class.
 
 ### `stageDefinitions.ts` — Stage Configs
 
-All stage-specific logic lives here. The orchestrator imports `getStageDefinition(name)` and treats every stage identically.
+All stage-specific logic lives here. The orchestrator imports `getStageDefinition(name, registry?)` and treats every stage identically.
 
 **Plan stage:**
-- System prompt: read-only analysis, decompose into subtasks, evaluate prompt quality
+- System prompt: read-only analysis, decompose into subtasks, evaluate prompt quality. Contains `{{dagPaletteDescriptions}}` and `{{postStagesDescription}}` placeholders interpolated at runtime.
 - Allowed tools: Read, Glob, Grep, Write (Write for the output file only)
-- `contextBuilder`: maps state → {workDir, prompt, memoryContext, outputFile}
-- `resultHandler`: receives validated Plan, runs cycle detection + shared resource conflict warnings, sets `state.plan`
+- `contextBuilder`: maps state → {workDir, prompt, memoryContext, outputFile, dagPaletteDescriptions, postStagesDescription}
+- `resultHandler`: receives validated Plan, validates stage references against `state.dagPalette`, rejects `needsRecursiveDecomposition` on non-Execute stages, runs cycle detection + shared resource conflict warnings, sets `state.plan`
 - `approvalRequired: true` (unless --auto-approve)
 - `approvalFormatter`: pretty-prints the plan for user review
 
 **Execute stage:**
 - System prompt: full tool access, complete the subtask, write summary JSON
 - `parallel: true` — uses DAG scheduling
-- `subtaskExtractor`: pulls subtask list from `state.plan`
+- `subtaskExtractor`: pulls subtask list from `state.plan`, forwards `stage` field
 - `contextBuilder`: includes plan summary, predecessor subtask summaries (wired via `subtask.dependencies` → `state.subtaskSnapshots`), memory
 - `resultHandler`: receives validated executor output, throws on `success: false` (triggers cascade-skip), otherwise stores ContextSnapshot
 
@@ -180,6 +185,18 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
 - `resultInterpreter`: extracts failed indices where `retryRecommended: true`
 - `retryStage: "Execute"` — on failure, re-run Execute for failed subtasks
 - `maxRetries: 2`
+
+**Helper: `formatStageDescriptions(stageNames, registry?)`** — formats stage names + first line of system prompt + tools for injection into the planner's system prompt.
+
+### `configLoader.ts` — Custom Stage Loading
+
+Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.config.json` (Zod-validated fallback). Merges with `BUILTIN_STAGES` via `mergeStages()`. Reserved names (Plan, Execute, Verify) require `overrideBuiltin: true`.
+
+- `loadCustomStages(projectDir)` — discovers and loads config file
+- `mergeStages(builtins, custom)` — merges with reserved name protection
+- `loadAndMergeStages(projectDir)` — convenience: load + merge
+- `validateStageDefinition(obj)` — validates required fields for TS-sourced stages
+- JSON stages get default `contextBuilder` and `resultHandler` via `makeDefaultContextBuilder()` / `makeDefaultResultHandler()`
 
 ### `promptBuilder.ts` — Prompt Assembly
 
@@ -232,19 +249,40 @@ Reads `.claw/memory/*.md` files and formats them as a context block injected int
 
 ## How to Add a Custom Stage
 
-1. Define a `StageDefinition` object in `stageDefinitions.ts` (or a separate file)
-2. Add it to `BUILTIN_STAGES`
-3. The stage needs at minimum: `name`, `runnerConfig` (system prompt + template), `contextBuilder`, `resultHandler`
-4. For parallel stages: add `parallel: true` and `subtaskExtractor`
-5. For stages that check results: add `resultInterpreter` and optionally `retryStage`
-6. Use it: `--pipeline "Plan,Execute,YourStage,Verify"`
+**Option A: Config file (declarative)**
+1. Create `claw.config.json` in your project root:
+   ```json
+   {
+     "stages": {
+       "Lint": {
+         "name": "Lint",
+         "runnerConfig": {
+           "systemPrompt": "You are a linting agent...",
+           "promptTemplate": "Working directory: {{workDir}}\n...",
+           "allowedTools": ["Read", "Bash", "Glob", "Grep"]
+         }
+       }
+     }
+   }
+   ```
+2. Use it: `--pipeline "Plan,Execute,Lint,Verify"`
+3. To make the planner assign it to DAG subtasks: `--dag-stages "Execute,Lint"`
 
-No changes to the orchestrator needed.
+**Option B: TypeScript config (full control)**
+1. Create `claw.config.ts` with `export default { stages: { ... } }` using full `StageDefinition` objects with function fields.
+
+**Option C: Built-in (for core stages)**
+1. Define a `StageDefinition` in `stageDefinitions.ts`, add to `BUILTIN_STAGES`
+2. Needs: `name`, `runnerConfig`, `contextBuilder`, `resultHandler`
+3. For parallel stages: add `parallel: true` and `subtaskExtractor`
+4. For stages that check results: add `resultInterpreter` and optionally `retryStage`
+
+No changes to the orchestrator needed in any case.
 
 ## Testing
 
 ```bash
-# Unit tests (168 tests, node:test runner)
+# Unit tests (213 tests, node:test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -272,3 +310,6 @@ bash test_scripts/e2e-recursive.sh    # recursive decomposition
 4. **Data-driven retry** — `retryStage` field on StageDefinition tells the orchestrator what to re-run. No hardcoded stage names in retry logic.
 5. **Cascade-skip via throw** — Execute `resultHandler` throws on `success: false`, caught by `Promise.allSettled` in DAG runner, which calls `markSkipped()` to cascade.
 6. **Immutable run logs** — every prompt, output, and verification attempt is preserved with numbering. Nothing is overwritten.
+7. **System prompt interpolation** — both system prompts and prompt templates are interpolated with `{{key}}` placeholders from `contextBuilder`. Enables runtime injection of pipeline metadata (DAG palette, post-stages) into the planner.
+8. **Per-subtask stage routing** — subtasks can specify a `stage` field to run through different stage definitions. The Plan stage validates stage references against the DAG palette. Only Execute-stage subtasks can be recursively decomposed.
+9. **Custom stages via config** — `claw.config.json` (declarative, Zod-validated) or `claw.config.ts` (full `StageDefinition` with functions). Merged with built-ins at startup. Reserved names protected.

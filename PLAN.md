@@ -695,7 +695,7 @@ npx claw --workdir . \
 | CLI entry point | Claude Code direct (Phase 0) | ✅ Done |
 | End-to-end validation | Continuous (`test_scripts/`) | Ongoing |
 | Recursive decomposition | Built by claw (Phase 1) | ✅ Done |
-| Custom stage support | Built by claw (Phase 2) | ✅ Done |
+| Custom stages + pipeline-aware planning | Phase 2 | ✅ Done |
 | Express + WebSocket backend | Built by claw (Phase 3) | Not started |
 | React frontend | Built by claw (Phase 4) | Not started |
 | Polish & integration | Built by claw (Phase 5) | Not started |

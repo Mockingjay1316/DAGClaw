@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claw UI is a multi-stage recursive orchestration engine for Claude Code. It decomposes tasks into subtasks via a Plan → Execute → Verify pipeline, running subtasks in parallel via DAG scheduling. Phase 1 complete: recursive decomposition allows subtasks to spawn child orchestrators with their own Plan/Execute/Verify pipelines.
+Claw UI is a multi-stage recursive orchestration engine for Claude Code. It decomposes tasks into subtasks via a Plan → Execute → Verify pipeline, running subtasks in parallel via DAG scheduling. Supports recursive decomposition, custom stages via `claw.config.json`/`.ts`, per-subtask stage routing, and pipeline-aware planning.
 
 ## Commands
 
@@ -30,19 +30,24 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 
 ## Architecture
 
-**Pipeline**: Orchestrator drives stages sequentially: Plan → Execute → Verify. Each stage is a `StageDefinition` with `contextBuilder`, `resultHandler`, and `formatStatus`. The orchestrator is stage-agnostic — all stage-specific logic lives in `src/stageDefinitions.ts`.
+**Pipeline**: Plan (mandatory) → DAG (heterogeneous execution) → Post-stages (mandatory, e.g., Verify). Each stage is a `StageDefinition` with `contextBuilder`, `resultHandler`, and `formatStatus`. The orchestrator is stage-agnostic — all stage-specific logic lives in `src/stageDefinitions.ts`.
 
-**Single execution primitive**: `TaskOrchestrator.runOne()` handles both standalone stages (Plan, Verify) and individual subtasks within parallel stages (Execute). DAG scheduling via `DependencyResolver`.
+**Single execution primitive**: `TaskOrchestrator.runOne()` handles both standalone stages (Plan, Verify) and individual subtasks within parallel stages. System prompts and prompt templates are both interpolated with `{{key}}` placeholders from `contextBuilder`. DAG scheduling via `DependencyResolver`.
 
-**Recursive decomposition**: When a subtask has `needsRecursiveDecomposition: true`, a child `TaskOrchestrator` is spawned with its own pipeline. Depth is tracked and limited by `maxDepth`. `TaskRegistry` tracks parent/child relationships.
+**Per-subtask stage routing**: Subtasks in the DAG can specify a `stage` field to route to different stage definitions (e.g., Execute, Lint, Verify). The planner receives the DAG palette (available stages) and post-stage info via system prompt interpolation. `--dag-stages` CLI flag controls the palette.
+
+**Custom stages**: Users define stages in `claw.config.json` or `claw.config.ts`. Loaded by `src/configLoader.ts`, merged with built-in stages, and passed as a registry to the orchestrator.
+
+**Recursive decomposition**: When a subtask has `needsRecursiveDecomposition: true`, a child `TaskOrchestrator` is spawned with its own pipeline. Only Execute-stage subtasks can recurse. Depth is tracked and limited by `maxDepth`. `TaskRegistry` tracks parent/child relationships.
 
 **Structured output via files**: Agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`). Each orchestrator instance gets its own tmp directory, preventing collisions during recursive runs. Orchestrator reads and validates via Zod schemas in `claudeRunner.ts`.
 
 **Key files**:
 - `src/types.ts` — All interfaces and Zod schemas (`PipelineState`, `StageDefinition`, `Plan`, etc.)
 - `src/claudeRunner.ts` — Claude CLI execution, prompt building, output parsing, usage tracking
-- `src/stageDefinitions.ts` — Built-in Plan/Execute/Verify stage configs
-- `src/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, concurrency control, recursive decomposition
+- `src/stageDefinitions.ts` — Built-in Plan/Execute/Verify stage configs, `formatStageDescriptions()`
+- `src/configLoader.ts` — Custom stage loading from `claw.config.json`/`.ts`, stage merging
+- `src/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, per-subtask stage routing, recursive decomposition
 - `src/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading
 - `src/runLogger.ts` — Persistent logging to `.claw/runs/`
 - `src/memoryManager.ts` — Memory distillation and injection from `.claw/memory/`
