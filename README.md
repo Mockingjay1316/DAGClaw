@@ -28,27 +28,34 @@ node --import tsx bin/claw.js runs --last
 ## How It Works
 
 ```
-You: "Build a REST API with user authentication"
-         │
-         ▼
-   ┌──────────┐     Analyzes codebase, decomposes into subtasks
-   │   Plan   │  →  with dependency graph
-   └────┬─────┘
-        ▼
-   ┌──────────┐     Runs subtasks in parallel (respecting deps)
-   │ Execute  │  →  Each subtask gets its own Claude Code instance
-   └────┬─────┘
-        ▼
-   ┌──────────┐     Reviews all changes, runs tests
-   │  Verify  │  →  Failed? Re-execute failed subtasks and re-verify
+  You: "Build a REST API with user authentication"
+                        │
+                        ▼
+                   ┌──────────┐     Analyzes codebase, knows available stages
+                   │   Plan   │  →  Decomposes into subtasks with dependency graph
+                   └────┬─────┘     Assigns stage per subtask (Execute, Lint, custom...)
+                        │
+                        ▼
+   ┌──────────────────────────────────────────────────┐
+   │              Heterogeneous DAG                   │
+   │                                                  │
+   │  [0] Write auth ──→ Execute    ─┐                │
+   │  [1] Write tests ──→ Execute    ├→ [3] Lint ──→  │
+   │  [2] Add routes ──→ Execute    ─┘    (Lint)      │
+   │                                                  │
+   │  Runs in parallel (respecting deps)              │
+   │  Each subtask gets its own Claude Code instance  │
+   │  Complex subtasks recurse into child pipelines   │
+   └────────────────────┬─────────────────────────────┘
+                        ▼
+   ┌──────────┐     Mandatory post-stage: reviews all changes,
+   │  Verify  │  →  runs tests, re-executes on failure (up to 3 retries)
    └──────────┘
 ```
 
-1. **Plan** — A read-only Claude instance analyzes the codebase and produces a structured plan with subtasks, dependencies, and complexity estimates
-2. **Execute** — Each subtask runs as an independent Claude Code instance. Independent subtasks run in parallel; dependent ones wait via DAG scheduling
-3. **Verify** — A verification agent reviews all changes, runs tests, and checks integration. Failed subtasks are automatically re-executed and re-verified (up to 3 retries)
-
-Complex subtasks marked with `needsRecursiveDecomposition: true` by the planner are automatically decomposed — a child orchestrator runs its own Plan → Execute → Verify pipeline, up to `maxDepth` levels deep (default: 3).
+1. **Plan** — A read-only Claude instance analyzes the codebase and produces a structured plan. It knows the available stages (via `--dag-stages`) and assigns each subtask to the appropriate stage. Complex subtasks are marked for recursive decomposition.
+2. **DAG Execution** — Subtasks run as independent Claude Code instances in parallel via DAG scheduling. Each subtask routes to its assigned stage definition (Execute, Lint, custom). Subtasks marked `needsRecursiveDecomposition: true` spawn child orchestrators with their own Plan → Execute → Verify pipeline, up to `maxDepth` levels deep (default: 3).
+3. **Post-stages** — Mandatory stages after the DAG (e.g., Verify). A verification agent reviews all changes, runs tests, and checks integration. Failed subtasks are automatically re-executed and re-verified.
 
 ## CLI Options
 
