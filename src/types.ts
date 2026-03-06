@@ -118,28 +118,6 @@ export interface StageState {
   error: string | null;
 }
 
-export interface ClaudeRunnerConfig {
-  backend?: RunnerBackend;
-  systemPrompt: string;
-  promptTemplate: string;
-  outputFile?: string; // path in .claw/tmp/ where agent writes structured output
-  allowedTools?: string[];
-  workDir?: string;
-  permissionMode?: PermissionMode;
-  contextSnapshots?: ContextSnapshot[];
-  resumeSessionId?: string;
-  timeoutMs?: number; // default 300000 (5 min)
-}
-
-export interface ClaudeRunnerResult {
-  rawOutput: string;
-  structuredOutput?: unknown;
-  sessionId: string;
-  contextSnapshot: ContextSnapshot;
-  messages: unknown[];
-  usage: UsageStats;
-}
-
 export interface SubtaskDefinition {
   index: number;
   prompt: string;
@@ -160,9 +138,15 @@ export interface PipelineState {
   verification: VerificationResult | null;
 }
 
+export interface StageRunnerConfig {
+  systemPrompt: string;
+  promptTemplate: string;
+  allowedTools?: string[];
+}
+
 export interface StageDefinition {
   name: string;
-  runnerConfig: Partial<ClaudeRunnerConfig>;
+  runnerConfig: StageRunnerConfig;
   approvalRequired?: boolean;
   /** If true, uses DAG from plan subtasks for parallel execution. */
   parallel?: boolean;
@@ -170,6 +154,8 @@ export interface StageDefinition {
   subtaskExtractor?: (state: PipelineState) => SubtaskDefinition[];
   /** Build the template context dict for this stage's prompt. */
   contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
+  /** Zod schema for validating the stage's structured JSON output. */
+  outputSchema?: { parse: (data: unknown) => unknown };
   /** Parse and apply the stage's output to pipeline state. Returns display message. */
   resultHandler: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition, sessionId?: string) => string;
   /** Interpret result for pass/fail. */

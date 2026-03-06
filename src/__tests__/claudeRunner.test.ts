@@ -4,7 +4,6 @@ import {
   parseUsageFromCliOutput,
   estimateCost,
   checkClaudeCli,
-  buildSnapshotFromOutput,
 } from '../claudeRunner.ts';
 
 describe('claudeRunner', () => {
@@ -60,37 +59,4 @@ describe('claudeRunner', () => {
     });
   });
 
-  describe('buildSnapshotFromOutput', () => {
-    it('extracts summary from structured output', () => {
-      const snap = buildSnapshotFromOutput(
-        { nodeId: 'n1', stage: 'Execute', subtaskIndex: '0' },
-        { summary: 'Did the thing', oneliner: 'thing done' },
-        'session-1'
-      );
-      assert.equal(snap.summary, 'Did the thing');
-      assert.equal(snap.oneliner, 'thing done');
-      assert.equal(snap.nodeId, 'n1');
-      assert.equal(snap.subtaskIndex, 0);
-      assert.equal(snap.sessionId, 'session-1');
-    });
-
-    it('handles null structured output', () => {
-      const snap = buildSnapshotFromOutput(
-        { nodeId: 'n1', stage: 'Plan' },
-        null,
-        'session-2'
-      );
-      assert.equal(snap.summary, '');
-      assert.equal(snap.oneliner, '');
-    });
-
-    it('handles missing subtaskIndex', () => {
-      const snap = buildSnapshotFromOutput(
-        { nodeId: 'n1', stage: 'Plan' },
-        null,
-        'session-3'
-      );
-      assert.equal(snap.subtaskIndex, undefined);
-    });
-  });
 });

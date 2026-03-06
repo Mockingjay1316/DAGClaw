@@ -247,8 +247,8 @@ export class TaskOrchestrator {
       : stage.name.toLowerCase();
     const outputFile = this.logger.tmpPath(`${fileLabel}.json`);
     const context = stage.contextBuilder(state, outputFile, subtask);
-    const prompt = buildStagePrompt(stage.runnerConfig.promptTemplate!, context);
-    const systemPrompt = stage.runnerConfig.systemPrompt!;
+    const prompt = buildStagePrompt(stage.runnerConfig.promptTemplate, context);
+    const systemPrompt = stage.runnerConfig.systemPrompt;
 
     this.logger.logStagePrompt(runId, stage.name, prompt, systemPrompt, subtask?.index);
     this.status(stage.formatStatus?.(subtask) ?? `[${stage.name}] Running...`);

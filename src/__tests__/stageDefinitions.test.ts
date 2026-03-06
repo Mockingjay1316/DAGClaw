@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   BUILTIN_STAGES,
   getStageDefinition,
-  planSubtaskExtractor,
   verifyResultInterpreter,
 } from '../stageDefinitions.ts';
 
@@ -61,25 +60,6 @@ describe('stageDefinitions', () => {
 
     it('throws for unknown stage', () => {
       assert.throws(() => getStageDefinition('Unknown'), /Unknown stage/);
-    });
-  });
-
-  describe('planSubtaskExtractor', () => {
-    it('extracts subtask definitions from plan', () => {
-      const plan = {
-        summary: 'test',
-        subtasks: [
-          { index: 0, description: 'd', prompt: 'p', dependencies: [], estimatedComplexity: 'low', needsRecursiveDecomposition: false },
-          { index: 1, description: 'd2', prompt: 'p2', dependencies: [0], estimatedComplexity: 'medium', needsRecursiveDecomposition: false },
-        ],
-        worthDistilling: false,
-      };
-
-      const defs = planSubtaskExtractor(plan);
-      assert.equal(defs.length, 2);
-      assert.equal(defs[0].index, 0);
-      assert.equal(defs[0].prompt, 'p');
-      assert.deepEqual(defs[1].dependencies, [0]);
     });
   });
 

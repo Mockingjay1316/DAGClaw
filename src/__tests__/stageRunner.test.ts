@@ -4,6 +4,11 @@ import {
   buildStagePrompt,
   parseStageOutput,
 } from '../claudeRunner.ts';
+import {
+  PlanSchema,
+  ExecutorOutputSchema,
+  VerificationResultSchema,
+} from '../types.ts';
 
 describe('buildStagePrompt', () => {
   it('interpolates template placeholders', () => {
@@ -28,14 +33,14 @@ describe('parseStageOutput', () => {
       subtasks: [],
       worthDistilling: false,
     };
-    const result = parseStageOutput('Plan', JSON.stringify(plan));
+    const result = parseStageOutput(PlanSchema, JSON.stringify(plan));
     assert.ok(result !== null);
     assert.equal((result as any).summary, 'Test plan');
   });
 
   it('parses Execute output', () => {
     const executor = { success: true, summary: 'Did the thing', oneliner: 'thing done' };
-    const result = parseStageOutput('Execute', JSON.stringify(executor));
+    const result = parseStageOutput(ExecutorOutputSchema, JSON.stringify(executor));
     assert.ok(result !== null);
     assert.equal((result as any).oneliner, 'thing done');
   });
@@ -47,20 +52,16 @@ describe('parseStageOutput', () => {
       skippedIndices: [],
       integrationResult: { pass: true, summary: 'OK', issues: [] },
     };
-    const result = parseStageOutput('Verify', JSON.stringify(verify));
+    const result = parseStageOutput(VerificationResultSchema, JSON.stringify(verify));
     assert.ok(result !== null);
     assert.equal((result as any).overallPass, true);
   });
 
   it('returns null for invalid JSON', () => {
-    assert.equal(parseStageOutput('Plan', 'not json'), null);
+    assert.equal(parseStageOutput(PlanSchema, 'not json'), null);
   });
 
   it('returns null for schema mismatch', () => {
-    assert.equal(parseStageOutput('Plan', JSON.stringify({ wrong: 'shape' })), null);
-  });
-
-  it('returns null for unknown stage', () => {
-    assert.equal(parseStageOutput('Unknown', '{}'), null);
+    assert.equal(parseStageOutput(PlanSchema, JSON.stringify({ wrong: 'shape' })), null);
   });
 });

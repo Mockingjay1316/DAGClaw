@@ -11,6 +11,11 @@ import type {
   Plan,
   VerificationResult,
 } from './types.ts';
+import {
+  PlanSchema,
+  ExecutorOutputSchema,
+  VerificationResultSchema,
+} from './types.ts';
 import { parseStageOutputFile } from './claudeRunner.ts';
 
 // --- Plan Stage ---
@@ -124,6 +129,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       promptTemplate: PLAN_PROMPT_TEMPLATE,
       allowedTools: ['Read', 'Glob', 'Grep', 'Write'],
     },
+    outputSchema: PlanSchema,
     approvalRequired: true,
 
     contextBuilder: (state, outputFile) => ({
@@ -134,7 +140,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     }),
 
     resultHandler: (state, outputFile) => {
-      const plan = parseStageOutputFile('Plan', outputFile) as Plan | null;
+      const plan = parseStageOutputFile(PlanSchema, outputFile) as Plan | null;
       if (!plan) return '[Plan] Failed to parse plan output.';
       state.plan = plan;
       return `[Plan] Generated plan: ${plan.subtasks.length} subtask(s) — ${plan.summary}`;
@@ -149,6 +155,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       systemPrompt: EXECUTE_SYSTEM_PROMPT,
       promptTemplate: EXECUTE_PROMPT_TEMPLATE,
     },
+    outputSchema: ExecutorOutputSchema,
     parallel: true,
 
     subtaskExtractor: (state) => {
@@ -170,7 +177,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     }),
 
     resultHandler: (state, outputFile, subtask, sessionId) => {
-      const output = parseStageOutputFile('Execute', outputFile) as { success: boolean; summary: string; oneliner: string } | null;
+      const output = parseStageOutputFile(ExecutorOutputSchema, outputFile) as { success: boolean; summary: string; oneliner: string } | null;
       const idx = subtask?.index ?? 0;
 
       // Signal failure so DAG runner can cascade-skip dependents
@@ -202,6 +209,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       promptTemplate: VERIFY_PROMPT_TEMPLATE,
       allowedTools: ['Read', 'Bash', 'Glob', 'Grep', 'Write'],
     },
+    outputSchema: VerificationResultSchema,
 
     contextBuilder: (state, outputFile) => {
       const summaries = Array.from(state.subtaskSnapshots.entries())
@@ -217,7 +225,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     },
 
     resultHandler: (state, outputFile) => {
-      const result = parseStageOutputFile('Verify', outputFile) as VerificationResult | null;
+      const result = parseStageOutputFile(VerificationResultSchema, outputFile) as VerificationResult | null;
       if (!result) return '[Verify] Could not parse verification result.';
       state.verification = result;
       const { pass, failedIndices } = verifyResultInterpreter(result);
@@ -244,16 +252,6 @@ export function getStageDefinition(name: string): StageDefinition {
     throw new Error(`Unknown stage: "${name}". Available: ${Object.keys(BUILTIN_STAGES).join(', ')}`);
   }
   return stage;
-}
-
-/** Extract subtask definitions from a Plan output (legacy helper). */
-export function planSubtaskExtractor(plan: unknown): SubtaskDefinition[] {
-  const p = plan as Plan;
-  return p.subtasks.map((s) => ({
-    index: s.index,
-    prompt: s.prompt,
-    dependencies: s.dependencies,
-  }));
 }
 
 /** Interpret verification output as pass/fail with failed indices. */

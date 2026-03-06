@@ -5,8 +5,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import type { ContextSnapshot, RunnerBackend, UsageStats } from './types.ts';
-import { PlanSchema, ExecutorOutputSchema, VerificationResultSchema } from './types.ts';
+import type { RunnerBackend, UsageStats } from './types.ts';
 import { interpolateTemplate } from './promptBuilder.ts';
 
 // --- Pricing (Sonnet 4, USD per 1M tokens) ---
@@ -76,23 +75,6 @@ export function checkClaudeCli(): boolean {
   }
 }
 
-/** Build a ContextSnapshot from structured executor output. */
-export function buildSnapshotFromOutput(
-  meta: { nodeId: string; stage: string; subtaskIndex?: string },
-  structuredOutput: { summary?: string; oneliner?: string } | null,
-  sessionId: string,
-): ContextSnapshot {
-  return {
-    nodeId: meta.nodeId,
-    stage: meta.stage,
-    subtaskIndex: meta.subtaskIndex !== undefined ? Number(meta.subtaskIndex) : undefined,
-    oneliner: structuredOutput?.oneliner ?? '',
-    filesModified: [],
-    summary: structuredOutput?.summary ?? '',
-    sessionId,
-  };
-}
-
 // --- Stage prompt building ---
 
 /** Build the prompt for a stage by interpolating its template with context. */
@@ -102,30 +84,21 @@ export function buildStagePrompt(promptTemplate: string, context: Record<string,
 
 // --- Structured output parsing ---
 
-/** Map stage names to their Zod schemas. */
-const STAGE_SCHEMAS: Record<string, { parse: (data: unknown) => unknown }> = {
-  Plan: PlanSchema,
-  Execute: ExecutorOutputSchema,
-  Verify: VerificationResultSchema,
-};
-
-/** Parse raw JSON string against a stage's schema. */
-export function parseStageOutput(stageName: string, raw: string): unknown | null {
-  const schema = STAGE_SCHEMAS[stageName];
-  if (!schema) return null;
+/** Parse raw JSON string against a Zod schema. */
+export function parseStageOutput(schema: { parse: (data: unknown) => unknown }, raw: string): unknown | null {
   try {
     return schema.parse(JSON.parse(raw));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[parseStageOutput] ${stageName} validation failed: ${msg.slice(0, 300)}\n`);
+    process.stderr.write(`[parseStageOutput] validation failed: ${msg.slice(0, 300)}\n`);
     return null;
   }
 }
 
-/** Parse a structured output file for a stage. */
-export function parseStageOutputFile(stageName: string, filePath: string): unknown | null {
+/** Parse a structured output file against a Zod schema. */
+export function parseStageOutputFile(schema: { parse: (data: unknown) => unknown }, filePath: string): unknown | null {
   try {
-    return parseStageOutput(stageName, readFileSync(filePath, 'utf-8'));
+    return parseStageOutput(schema, readFileSync(filePath, 'utf-8'));
   } catch {
     return null;
   }
