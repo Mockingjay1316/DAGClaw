@@ -18,7 +18,7 @@ const DEFAULTS = {
   pipeline: ['Plan', 'Execute', 'Verify'],
   backend: { type: 'cli' } as RunnerBackend,
   permissionMode: 'interactive' as const,
-  maxRetries: 2,
+  maxRetries: 3,
   maxConcurrency: 3,
   maxDepth: 3,
   timeoutSeconds: 300,
