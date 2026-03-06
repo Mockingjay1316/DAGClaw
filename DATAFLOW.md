@@ -47,7 +47,7 @@
 ```
 TaskOrchestrator.run()
 │
-├─ 1. checkStaleLock(workDir)
+├─ 1. IF !isChild: checkStaleLock(workDir)
 │     → returns {runId: string, pid: number} | null
 │
 ├─ 2. checkClaudeCli()
@@ -67,7 +67,7 @@ TaskOrchestrator.run()
 │     → returns runId: string
 │     → creates .claw/runs/<runId>/manifest.json
 │
-├─ 5. acquireLock(workDir, runId)
+├─ 5. IF !isChild: acquireLock(workDir, runId)
 │     → creates .claw/lock {pid, runId, startedAt}
 │
 ├─ 6. memory.buildContextBlock()
@@ -105,8 +105,8 @@ TaskOrchestrator.run()
 │          → retryLoop(runId, stage, state)
 │
 ├─ 9. logger.updateManifestStatus(runId, "completed" | "failed")
-├─ 10. printCostSummary(runId)
-└─ 11. releaseLock(workDir)
+├─ 10. IF !noSummary: printCostSummary(runId)
+└─ 11. IF !isChild: releaseLock(workDir)
 ```
 
 ## `runOne()` — Single Execution Primitive
@@ -116,9 +116,9 @@ Every Claude invocation flows through this method.
 ```
 runOne(runId, stage, state, subtask?)
 │
-├─ 1. Compute output file path
-│     subtask? → ".claw/tmp/subtask-{N}-summary.json"
-│     stage    → ".claw/tmp/{stage}.json"
+├─ 1. Compute output file path (run-scoped tmp)
+│     subtask? → ".claw/runs/<runId>/tmp/subtask-{N}-summary.json"
+│     stage    → ".claw/runs/<runId>/tmp/{stage}.json"
 │
 ├─ 2. stage.contextBuilder(state, outputFile, subtask?)
 │     │
@@ -127,7 +127,7 @@ runOne(runId, stage, state, subtask?)
 │     │  │ workDir: "/path/to/project"          │
 │     │  │ prompt: "Build a CLI tool..."        │
 │     │  │ memoryContext: "--- Memory ---\n..." │
-│     │  │ outputFile: ".claw/tmp/plan.json"    │
+│     │  │ outputFile: ".claw/runs/<id>/tmp/plan.json" │
 │     │  └──────────────────────────────────────┘
 │     │
 │     │  Execute returns:
@@ -139,7 +139,7 @@ runOne(runId, stage, state, subtask?)
 │     │  │   "[Subtask 0] Created Express app with routes"        │
 │     │  │   (built from subtask.dependencies → subtaskSnapshots) │
 │     │  │ memoryContext: "--- Memory ---\n..."                   │
-│     │  │ outputFile: ".claw/tmp/subtask-0-summary.json"         │
+│     │  │ outputFile: ".claw/runs/<id>/tmp/subtask-0-summary.json" │
 │     │  └────────────────────────────────────────────────────────┘
 │     │
 │     │  Verify returns:
@@ -148,7 +148,7 @@ runOne(runId, stage, state, subtask?)
 │     │  │ planSummary: "Build 3-file project..."       │
 │     │  │ subtaskSummaries: "[Subtask 0] Created..."   │
 │     │  │ skippedIndices: "none" | "1, 2"              │
-│     │  │ outputFile: ".claw/tmp/verify.json"          │
+│     │  │ outputFile: ".claw/runs/<id>/tmp/verify.json" │
 │     │  └──────────────────────────────────────────────┘
 │     │
 │     → returns Record<string, string>  (template variables)
@@ -253,8 +253,9 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │    │
 │    ├─ batch = ready.slice(0, maxConcurrency)
 │    │
-│    ├─ Promise.allSettled(batch.map(runOne))
+│    ├─ Promise.allSettled(batch.map(runOne or runRecursive))
 │    │   → runs subtasks in parallel up to maxConcurrency
+│    │   → if shouldRecurse(idx, plan): spawns child orchestrator
 │    │
 │    └─ FOR each result:
 │         fulfilled → resolver.markComplete(idx)
@@ -306,9 +307,42 @@ retryLoop(runId, verifyStage, state)
 │         → verification-0.json, verification-1.json, ...
 ```
 
+## `runRecursive()` — Child Orchestrator Spawning
+
+```
+runRecursive(runId, stage, state, subtask)
+│
+├─ 1. shouldRecurse(subtask.index, state.plan)
+│     → true (needsRecursiveDecomposition flag set by planner)
+│
+├─ 2. buildChildOptions(parentOpts, planSubtask, depth)
+│     → CliOptions with:
+│       prompt = subtask.prompt
+│       autoApprove = true, noSummary = true
+│       maxDepth = parentOpts.maxDepth (unchanged)
+│       depth check: throws if depth >= maxDepth
+│
+├─ 3. logger.createChildLogger(runId)
+│     → RunLogger with parentRunDir = runs/<parentRunId>/
+│     → child runs go to runs/<parentRunId>/children/<childRunId>/
+│
+├─ 4. new TaskOrchestrator(childOpts, callbacks, depth+1, childLogger)
+│     → isChild = true (skips lock management)
+│
+├─ 5. child.run()
+│     → runs full Plan → Execute → Verify pipeline
+│     → logs to nested directory
+│     → returns {runId, success}
+│
+├─ 6. IF !success: throw Error (triggers cascade-skip in parent DAG)
+│
+└─ 7. Store ContextSnapshot in state.subtaskSnapshots
+      → downstream subtasks can reference recursive subtask output
+```
+
 ## Structured Output Schemas (Zod)
 
-Agents write JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates via each stage's declared `outputSchema` (Zod), then passes parsed data to `resultHandler`:
+Agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`). The orchestrator's `runOne()` validates via each stage's declared `outputSchema` (Zod), then passes parsed data to `resultHandler`:
 
 ### Plan Output (`plan.json`)
 ```json
@@ -354,18 +388,12 @@ Agents write JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates
 
 ```
 .claw/
-├── lock                              ← acquireLock/releaseLock
+├── lock                              ← acquireLock/releaseLock (root only)
 │   {pid: 12345, runId: "...", startedAt: "..."}
 │
 ├── memory/                           ← MemoryManager reads
 │   ├── conventions.md
 │   └── patterns.md
-│
-├── tmp/                              ← cleaned per run, agents write here
-│   ├── plan.json
-│   ├── subtask-0-summary.json
-│   ├── subtask-1-summary.json
-│   └── verify.json
 │
 └── runs/
     └── 2026-03-05T18-26-46_7ea06bfd/
@@ -377,6 +405,11 @@ Agents write JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates
         ├── verification.json         ← latest result
         ├── verification-0.json       ← first attempt
         ├── verification-1.json       ← retry attempt
+        ├── tmp/                      ← run-scoped structured output (persisted)
+        │   ├── plan.json
+        │   ├── subtask-0-summary.json
+        │   ├── subtask-1-summary.json
+        │   └── verify.json
         ├── prompts/
         │   ├── plan.md
         │   ├── execute-subtask-0.md
@@ -384,7 +417,16 @@ Agents write JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates
         │   ├── execute-subtask-1-retry-1.md
         │   ├── verify.md
         │   └── verify-retry-1.md
-        └── subtasks/
-            ├── 0.log
-            └── 1.log
+        ├── subtasks/
+        │   ├── 0.log
+        │   └── 1.log
+        └── children/                 ← recursive decomposition child runs
+            └── 2026-03-05T18-28-01_48baaa21/
+                ├── manifest.json
+                ├── plan.json
+                ├── tmp/              ← child's own tmp (isolated from parent)
+                │   └── ...
+                ├── prompts/
+                ├── subtasks/
+                └── children/         ← grandchild runs (if any)
 ```
