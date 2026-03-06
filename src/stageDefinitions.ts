@@ -104,6 +104,13 @@ RULES:
 5. Consider file dependencies when decomposing: if two subtasks modify the same files, mark one as dependent on the other.
 6. Keep subtask count reasonable (soft limit: 10). If you find yourself creating more, consider whether some subtasks can be merged.
 7. Set "worthDistilling" to true if this task involves non-trivial work that future runs could learn from.
+8. RECURSIVE DECOMPOSITION: For complex subtasks that are themselves multi-step tasks (e.g., "build an auth system with routes, middleware, and tests"), set "needsRecursiveDecomposition": true. These subtasks will be handled by a child orchestrator that runs its own Plan → Execute → Verify pipeline. Use this for subtasks with high complexity that span multiple files or concerns. Only "Execute" stage subtasks can be recursively decomposed.
+9. STAGE ASSIGNMENT: Each subtask runs through a stage that determines its tools and behavior. Available stages for assignment:
+{{dagPaletteDescriptions}}
+   Assign the most appropriate stage via the "stage" field. Default is "Execute" if omitted.
+10. PIPELINE AWARENESS: After all subtasks complete, these stages run automatically:
+{{postStagesDescription}}
+   Do NOT create subtasks that duplicate their work. For example, if a Verify stage runs as a post-stage, you don't need a final verification subtask unless you want intermediate checking within the DAG.
 
 Write your structured output as valid JSON to the file path provided in the task prompt.`;
 
@@ -125,7 +132,8 @@ The JSON must conform to this schema:
       "prompt": "self-contained prompt for the executor",
       "dependencies": [],
       "estimatedComplexity": "low" | "medium" | "high",
-      "needsRecursiveDecomposition": false
+      "needsRecursiveDecomposition": false,
+      "stage": "Execute"
     }
   ],
   "qualityFlag": { "concern": "vague", "message": "...", "suggestion": "..." } | null,
@@ -220,6 +228,10 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       prompt: state.prompt,
       memoryContext: state.memoryContext,
       outputFile,
+      dagPaletteDescriptions: state.stageDescriptions || '   - Execute: Full tool access execution agent (tools: all)',
+      postStagesDescription: state.postStages.length > 0
+        ? state.postStages.map(s => `   - ${s}`).join('\n')
+        : '   (none)',
     }),
 
     resultHandler: (state, parsedOutput) => {
@@ -230,6 +242,22 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
         plan.subtasks.map(s => ({ index: s.index, dependencies: s.dependencies }))
       );
       if (cycle) throw new Error(`Circular dependency in plan: ${cycle.join(' → ')}`);
+
+      // Validate stage references against DAG palette
+      for (const s of plan.subtasks) {
+        if (s.stage && state.dagPalette.length > 0 && !state.dagPalette.includes(s.stage)) {
+          throw new Error(
+            `Subtask ${s.index} references stage "${s.stage}" which is not in the DAG palette. ` +
+            `Available: ${state.dagPalette.join(', ')}`
+          );
+        }
+        if (s.needsRecursiveDecomposition && s.stage && s.stage !== 'Execute') {
+          throw new Error(
+            `Subtask ${s.index} has needsRecursiveDecomposition but stage="${s.stage}". ` +
+            `Only "Execute" subtasks can be recursively decomposed.`
+          );
+        }
+      }
 
       const conflicts = detectSharedResourceConflicts(plan.subtasks);
 
@@ -259,6 +287,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
         index: s.index,
         prompt: s.prompt,
         dependencies: s.dependencies,
+        stage: s.stage,
       }));
     },
 
@@ -355,12 +384,30 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
 // --- Helpers ---
 
 /** Resolve a stage name to its definition. Throws if not found. */
-export function getStageDefinition(name: string): StageDefinition {
-  const stage = BUILTIN_STAGES[name];
+export function getStageDefinition(
+  name: string,
+  registry?: Record<string, StageDefinition>,
+): StageDefinition {
+  const stages = registry ?? BUILTIN_STAGES;
+  const stage = stages[name];
   if (!stage) {
-    throw new Error(`Unknown stage: "${name}". Available: ${Object.keys(BUILTIN_STAGES).join(', ')}`);
+    throw new Error(`Unknown stage: "${name}". Available: ${Object.keys(stages).join(', ')}`);
   }
   return stage;
+}
+
+/** Format stage descriptions for injection into the planner's system prompt. */
+export function formatStageDescriptions(
+  stageNames: string[],
+  registry?: Record<string, StageDefinition>,
+): string {
+  return stageNames.map(name => {
+    const stage = (registry ?? BUILTIN_STAGES)[name];
+    if (!stage) return `   - ${name}: (unknown stage)`;
+    const tools = stage.runnerConfig.allowedTools?.join(', ') || 'all';
+    const desc = stage.runnerConfig.systemPrompt.split('\n')[0];
+    return `   - ${name}: ${desc} (tools: ${tools})`;
+  }).join('\n');
 }
 
 /** Interpret verification output as pass/fail with failed indices. */

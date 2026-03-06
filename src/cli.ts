@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline';
 import type { CliOptions, RunnerBackend } from './types.ts';
 import { TaskOrchestrator } from './taskOrchestrator.ts';
 import { RunLogger } from './runLogger.ts';
+import { loadAndMergeStages } from './configLoader.ts';
 
 // --- Arg parsing (exported for testing) ---
 
@@ -22,6 +23,7 @@ const DEFAULTS = {
   maxConcurrency: 3,
   maxDepth: 3,
   timeoutSeconds: 300,
+  dagStages: ['Execute'],
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -42,6 +44,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.timeout = args[++i] ?? '';
     } else if (arg === '--max-concurrency') {
       flags.maxConcurrency = args[++i] ?? '';
+    } else if (arg === '--dag-stages') {
+      flags.dagStages = args[++i] ?? '';
     } else if (arg === '--yolo') {
       flags.yolo = true;
     } else if (arg === '--auto-approve' || arg === '--auto-execute') {
@@ -77,6 +81,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       timeoutSeconds: DEFAULTS.timeoutSeconds,
       noSummary: false,
       noMemory: false,
+      dagStages: DEFAULTS.dagStages,
     };
   }
 
@@ -116,6 +121,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       : DEFAULTS.timeoutSeconds,
     noSummary: !!flags.noSummary,
     noMemory: !!flags.noMemory,
+    dagStages: flags.dagStages
+      ? (flags.dagStages as string).split(',').map(s => s.trim())
+      : DEFAULTS.dagStages,
   };
 }
 
@@ -179,11 +187,30 @@ async function main() {
     return;
   }
 
+  let stageRegistry;
+  try {
+    stageRegistry = await loadAndMergeStages(parsed.workDir);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    warn(`Failed to load claw config: ${errMsg}. Using built-in stages only.`);
+    stageRegistry = undefined;
+  }
+
+  if (stageRegistry) {
+    for (const stageName of parsed.pipeline) {
+      if (!stageRegistry[stageName]) {
+        throw new Error(
+          `Unknown stage "${stageName}" in pipeline. Available: ${Object.keys(stageRegistry).join(', ')}`
+        );
+      }
+    }
+  }
+
   const orchestrator = new TaskOrchestrator(parsed, {
     onStatus: log,
     onWarning: warn,
     onApprovalRequest: askYesNo,
-  });
+  }, 0, undefined, stageRegistry);
 
   orchestrator.setupSignalHandlers();
 

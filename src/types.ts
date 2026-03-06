@@ -46,6 +46,7 @@ export const SubtaskSchema = z.object({
   dependencies: z.array(z.number()),
   estimatedComplexity: z.enum(['low', 'medium', 'high']),
   needsRecursiveDecomposition: z.boolean(),
+  stage: z.string().optional(),
 });
 
 export const PlanSchema = z.object({
@@ -95,6 +96,31 @@ export const ExecutorOutputSchema = z.object({
 
 export type ExecutorOutput = z.infer<typeof ExecutorOutputSchema>;
 
+// --- Custom Stage Config (claw.config.json) ---
+
+export const ClawConfigStageRunnerSchema = z.object({
+  systemPrompt: z.string(),
+  promptTemplate: z.string(),
+  allowedTools: z.array(z.string()).optional(),
+});
+
+export const ClawConfigStageSchema = z.object({
+  name: z.string(),
+  runnerConfig: ClawConfigStageRunnerSchema,
+  approvalRequired: z.boolean().optional(),
+  parallel: z.boolean().optional(),
+  maxRetries: z.number().optional(),
+  retryStage: z.string().optional(),
+});
+
+export const ClawConfigSchema = z.object({
+  stages: z.record(z.string(), ClawConfigStageSchema),
+});
+
+export type ClawConfigStageRunner = z.infer<typeof ClawConfigStageRunnerSchema>;
+export type ClawConfigStage = z.infer<typeof ClawConfigStageSchema>;
+export type ClawConfig = z.infer<typeof ClawConfigSchema>;
+
 // --- Stage ---
 
 export type TaskStatus =
@@ -117,6 +143,7 @@ export interface SubtaskDefinition {
   index: number;
   prompt: string;
   dependencies: number[];
+  stage?: string;
 }
 
 /**
@@ -131,6 +158,9 @@ export interface PipelineState {
   skippedIndices: Set<number>;
   memoryContext: string;
   verification: VerificationResult | null;
+  dagPalette: string[];
+  postStages: string[];
+  stageDescriptions: string;
 }
 
 export interface StageRunnerConfig {
@@ -239,4 +269,5 @@ export interface CliOptions {
   timeoutSeconds: number;
   noSummary: boolean;
   noMemory: boolean;
+  dagStages: string[];
 }

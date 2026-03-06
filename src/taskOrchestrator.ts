@@ -17,7 +17,7 @@ import type {
   UsageStats,
 } from './types.ts';
 import { DependencyResolver } from './dependencyResolver.ts';
-import { getStageDefinition } from './stageDefinitions.ts';
+import { getStageDefinition, formatStageDescriptions } from './stageDefinitions.ts';
 import { RunLogger } from './runLogger.ts';
 import { MemoryManager } from './memoryManager.ts';
 import { acquireLock, releaseLock, checkStaleLock } from './taskManager.ts';
@@ -69,6 +69,7 @@ export function buildChildOptions(parentOpts: CliOptions, subtask: Subtask, curr
     timeoutSeconds: parentOpts.timeoutSeconds,
     noSummary: true,
     noMemory: parentOpts.noMemory,
+    dagStages: parentOpts.dagStages,
   };
 }
 
@@ -102,14 +103,16 @@ export class TaskOrchestrator {
   private isShuttingDown = false;
   private depth: number;
   private isChild: boolean;
+  private stageRegistry?: Record<string, StageDefinition>;
 
-  constructor(opts: CliOptions, cb: OrchestratorCallbacks = {}, depth: number = 0, logger?: RunLogger) {
+  constructor(opts: CliOptions, cb: OrchestratorCallbacks = {}, depth: number = 0, logger?: RunLogger, stageRegistry?: Record<string, StageDefinition>) {
     this.opts = opts;
     this.logger = logger ?? new RunLogger(opts.workDir);
     this.memory = new MemoryManager(opts.workDir);
     this.cb = cb;
     this.depth = depth;
     this.isChild = depth > 0;
+    this.stageRegistry = stageRegistry;
   }
 
   private status(msg: string) { this.cb.onStatus?.(msg); }
@@ -134,11 +137,19 @@ export class TaskOrchestrator {
     if (!this.isChild) acquireLock(this.opts.workDir, runId);
     this.logger.cleanTmp();
 
+    const executeIdx = this.opts.pipeline.indexOf('Execute');
+    const postStages = executeIdx >= 0
+      ? this.opts.pipeline.slice(executeIdx + 1)
+      : [];
+
     const state: PipelineState = {
       prompt: this.opts.prompt, workDir: this.opts.workDir,
       plan: null, subtaskSnapshots: new Map(), skippedIndices: new Set(),
       memoryContext: this.opts.noMemory ? '' : this.memory.buildContextBlock(),
       verification: null,
+      dagPalette: this.opts.dagStages,
+      postStages,
+      stageDescriptions: formatStageDescriptions(this.opts.dagStages, this.stageRegistry),
     };
 
     this.status(`[Run ${runId}] Pipeline: ${this.opts.pipeline.join(' → ')}`);
@@ -146,7 +157,7 @@ export class TaskOrchestrator {
     try {
       for (const stageName of this.opts.pipeline) {
         if (this.isShuttingDown) break;
-        const stage = getStageDefinition(stageName);
+        const stage = getStageDefinition(stageName, this.stageRegistry);
 
         if (stage.parallel && stage.subtaskExtractor) {
           const subtasks = stage.subtaskExtractor(state);
@@ -208,7 +219,7 @@ export class TaskOrchestrator {
     const outputFile = this.logger.tmpPath(`${fileLabel}.json`);
     const context = stage.contextBuilder(state, outputFile, subtask);
     const prompt = buildStagePrompt(stage.runnerConfig.promptTemplate, context);
-    const systemPrompt = stage.runnerConfig.systemPrompt;
+    const systemPrompt = buildStagePrompt(stage.runnerConfig.systemPrompt, context);
 
     this.logger.logStagePrompt(runId, stage.name, prompt, systemPrompt, subtask?.index);
     this.status(stage.formatStatus?.(subtask) ?? `[${stage.name}] Running...`);
@@ -258,10 +269,15 @@ export class TaskOrchestrator {
       const batch = ready.slice(0, this.opts.maxConcurrency);
       const results = await Promise.allSettled(
         batch.map(idx => {
+          const subtask = byIndex.get(idx)!;
+          const effectiveStage = subtask.stage
+            ? getStageDefinition(subtask.stage, this.stageRegistry)
+            : stage;
+
           if (shouldRecurse(idx, state.plan!)) {
-            return this.runRecursive(runId, stage, state, byIndex.get(idx)!);
+            return this.runRecursive(runId, effectiveStage, state, subtask);
           }
-          return this.runOne(runId, stage, state, byIndex.get(idx)!);
+          return this.runOne(runId, effectiveStage, state, subtask);
         })
       );
 
@@ -297,7 +313,7 @@ export class TaskOrchestrator {
     const planSubtask = state.plan!.subtasks.find(s => s.index === idx)!;
     const childOpts = buildChildOptions(this.opts, planSubtask, this.depth);
     const childLogger = this.logger.createChildLogger(runId);
-    const child = new TaskOrchestrator(childOpts, this.cb, this.depth + 1, childLogger);
+    const child = new TaskOrchestrator(childOpts, this.cb, this.depth + 1, childLogger, this.stageRegistry);
 
     const result = await child.run();
 
@@ -363,7 +379,7 @@ export class TaskOrchestrator {
 
       // Re-run the configured retry stage for failed indices only
       this.status(`[${stage.name}] Re-executing ${failedIndices.length} subtask(s) via ${stage.retryStage} (attempt ${attempt + 1}/${maxRetries})...`);
-      const retryStage = getStageDefinition(stage.retryStage);
+      const retryStage = getStageDefinition(stage.retryStage, this.stageRegistry);
       const allSubtasks = retryStage.subtaskExtractor?.(state) ?? [];
       const retrySubtasks = allSubtasks.filter(s => failedIndices.includes(s.index));
 
