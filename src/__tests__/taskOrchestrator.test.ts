@@ -1,12 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  formatPlanForDisplay,
-  detectSharedResourceConflicts,
   aggregateUsage,
   getFilesModifiedByGit,
   isGitRepo,
 } from '../taskOrchestrator.ts';
+import {
+  formatPlanForDisplay,
+  detectSharedResourceConflicts,
+} from '../stageDefinitions.ts';
 import type { Plan, UsageStats } from '../types.ts';
 
 // --- formatPlanForDisplay ---

@@ -10,12 +10,11 @@ import { join } from 'node:path';
 import type {
   CliOptions,
   PipelineState,
-  Plan,
   SubtaskDefinition,
   StageDefinition,
   UsageStats,
 } from './types.ts';
-import { DependencyResolver, detectCircularDependencies } from './dependencyResolver.ts';
+import { DependencyResolver } from './dependencyResolver.ts';
 import { getStageDefinition } from './stageDefinitions.ts';
 import { RunLogger } from './runLogger.ts';
 import { MemoryManager } from './memoryManager.ts';
@@ -23,78 +22,6 @@ import { acquireLock, releaseLock, checkStaleLock } from './taskManager.ts';
 import { buildStagePrompt, checkClaudeCli, runClaudeCli } from './claudeRunner.ts';
 
 // --- Pure utility functions (exported for testing) ---
-
-/** Format a Plan as human-readable text for CLI display. */
-export function formatPlanForDisplay(plan: Plan): string {
-  const lines: string[] = [];
-  lines.push(`[Plan] Generated plan: ${plan.subtasks.length} subtask${plan.subtasks.length !== 1 ? 's' : ''}`);
-  lines.push('');
-  lines.push(`  Summary: ${plan.summary}`);
-  lines.push('');
-  lines.push('  Subtasks:');
-  for (const s of plan.subtasks) {
-    const deps = s.dependencies.length > 0
-      ? ` (depends on: ${s.dependencies.join(', ')})`
-      : '';
-    lines.push(`    [${s.index}] ${s.description} (${s.estimatedComplexity} complexity${deps})`);
-  }
-  if (plan.qualityFlag) {
-    lines.push('');
-    lines.push(`  Quality concern [${plan.qualityFlag.concern}]: ${plan.qualityFlag.message}`);
-    if (plan.qualityFlag.suggestion) {
-      lines.push(`  Suggestion: ${plan.qualityFlag.suggestion}`);
-    }
-  }
-  return lines.join('\n');
-}
-
-/** Shared resource patterns to detect potential parallel conflicts. */
-const SHARED_RESOURCE_PATTERNS = [
-  { pattern: /\bnpm\s+(install|i|ci|update)\b/i, label: 'npm' },
-  { pattern: /\byarn\s+(add|install|remove)\b/i, label: 'yarn' },
-  { pattern: /\bpnpm\s+(add|install|remove)\b/i, label: 'pnpm' },
-  { pattern: /\bpip\s+install\b/i, label: 'pip' },
-  { pattern: /\bbundle\s+install\b/i, label: 'bundler' },
-  { pattern: /\bcargo\s+(build|install)\b/i, label: 'cargo' },
-];
-
-/** Detect potential shared resource conflicts among independent subtasks. */
-export function detectSharedResourceConflicts(
-  subtasks: Pick<SubtaskDefinition, 'index' | 'prompt' | 'dependencies'>[],
-): string[] {
-  const warnings: string[] = [];
-  const resourceUsers = new Map<string, number[]>();
-
-  for (const s of subtasks) {
-    for (const { pattern, label } of SHARED_RESOURCE_PATTERNS) {
-      if (pattern.test(s.prompt)) {
-        const users = resourceUsers.get(label) ?? [];
-        users.push(s.index);
-        resourceUsers.set(label, users);
-      }
-    }
-  }
-
-  const depOf = new Set<string>();
-  for (const s of subtasks) {
-    for (const dep of s.dependencies) depOf.add(`${s.index}:${dep}`);
-  }
-
-  for (const [label, users] of resourceUsers) {
-    if (users.length < 2) continue;
-    for (let i = 0; i < users.length; i++) {
-      for (let j = i + 1; j < users.length; j++) {
-        const a = users[i], b = users[j];
-        if (!depOf.has(`${a}:${b}`) && !depOf.has(`${b}:${a}`)) {
-          warnings.push(
-            `Subtasks ${a} and ${b} both use ${label} but are independent — consider adding a dependency edge.`,
-          );
-        }
-      }
-    }
-  }
-  return warnings;
-}
 
 /** Aggregate multiple UsageStats into a single total. */
 export function aggregateUsage(stats: UsageStats[]): UsageStats {
@@ -198,8 +125,8 @@ export class TaskOrchestrator {
           await this.runOne(runId, stage, state);
         }
 
-        if (stage.approvalRequired && !this.opts.autoApprove && state.plan) {
-          const approved = await this.approvePlan(stageName, state.plan);
+        if (stage.approvalRequired && !this.opts.autoApprove) {
+          const approved = await this.requestApproval(stage, state);
           if (!approved) {
             this.logger.updateManifestStatus(runId, 'cancelled');
             return { runId, success: false };
@@ -316,22 +243,15 @@ export class TaskOrchestrator {
     }
   }
 
-  /** Validate plan and prompt for approval. */
-  private async approvePlan(stageName: string, plan: Plan): Promise<boolean> {
-    const cycle = detectCircularDependencies(
-      plan.subtasks.map(s => ({ index: s.index, dependencies: s.dependencies }))
-    );
-    if (cycle) throw new Error(`Circular dependency: ${cycle.join(' → ')}`);
-
-    for (const w of detectSharedResourceConflicts(plan.subtasks)) {
-      this.warn(`[${stageName}] ${w}`);
+  /** Display stage result and prompt for approval. */
+  private async requestApproval(stage: StageDefinition, state: PipelineState): Promise<boolean> {
+    if (stage.approvalFormatter) {
+      const display = stage.approvalFormatter(state, (w) => this.warn(`[${stage.name}] ${w}`));
+      this.status(display);
     }
 
-    this.status(formatPlanForDisplay(plan));
-    if (plan.qualityFlag) this.status(`\n  [Quality] ${plan.qualityFlag.message}`);
-
-    const ok = await this.cb.onApprovalRequest?.('\n  Approve plan? (y/n): ');
-    if (!ok) { this.status(`[${stageName}] Rejected.`); return false; }
+    const ok = await this.cb.onApprovalRequest?.(`\n  Approve ${stage.name.toLowerCase()}? (y/n): `);
+    if (!ok) { this.status(`[${stage.name}] Rejected.`); return false; }
     return true;
   }
 

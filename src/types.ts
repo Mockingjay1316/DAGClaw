@@ -143,6 +143,8 @@ export interface StageDefinition {
   name: string;
   runnerConfig: StageRunnerConfig;
   approvalRequired?: boolean;
+  /** Format the stage's result for user review before approval. */
+  approvalFormatter?: (state: PipelineState, warn: (msg: string) => void) => string;
   /** If true, uses DAG from plan subtasks for parallel execution. */
   parallel?: boolean;
   /** Extract subtask definitions from prior pipeline state (for parallel stages). */

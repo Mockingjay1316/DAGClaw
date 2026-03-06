@@ -17,6 +17,81 @@ import {
   VerificationResultSchema,
 } from './types.ts';
 import { parseStageOutputFile } from './claudeRunner.ts';
+import { detectCircularDependencies } from './dependencyResolver.ts';
+
+// --- Plan display & validation helpers (exported for testing) ---
+
+/** Format a Plan as human-readable text for CLI display. */
+export function formatPlanForDisplay(plan: Plan): string {
+  const lines: string[] = [];
+  lines.push(`[Plan] Generated plan: ${plan.subtasks.length} subtask${plan.subtasks.length !== 1 ? 's' : ''}`);
+  lines.push('');
+  lines.push(`  Summary: ${plan.summary}`);
+  lines.push('');
+  lines.push('  Subtasks:');
+  for (const s of plan.subtasks) {
+    const deps = s.dependencies.length > 0
+      ? ` (depends on: ${s.dependencies.join(', ')})`
+      : '';
+    lines.push(`    [${s.index}] ${s.description} (${s.estimatedComplexity} complexity${deps})`);
+  }
+  if (plan.qualityFlag) {
+    lines.push('');
+    lines.push(`  Quality concern [${plan.qualityFlag.concern}]: ${plan.qualityFlag.message}`);
+    if (plan.qualityFlag.suggestion) {
+      lines.push(`  Suggestion: ${plan.qualityFlag.suggestion}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/** Shared resource patterns to detect potential parallel conflicts. */
+const SHARED_RESOURCE_PATTERNS = [
+  { pattern: /\bnpm\s+(install|i|ci|update)\b/i, label: 'npm' },
+  { pattern: /\byarn\s+(add|install|remove)\b/i, label: 'yarn' },
+  { pattern: /\bpnpm\s+(add|install|remove)\b/i, label: 'pnpm' },
+  { pattern: /\bpip\s+install\b/i, label: 'pip' },
+  { pattern: /\bbundle\s+install\b/i, label: 'bundler' },
+  { pattern: /\bcargo\s+(build|install)\b/i, label: 'cargo' },
+];
+
+/** Detect potential shared resource conflicts among independent subtasks. */
+export function detectSharedResourceConflicts(
+  subtasks: Pick<SubtaskDefinition, 'index' | 'prompt' | 'dependencies'>[],
+): string[] {
+  const warnings: string[] = [];
+  const resourceUsers = new Map<string, number[]>();
+
+  for (const s of subtasks) {
+    for (const { pattern, label } of SHARED_RESOURCE_PATTERNS) {
+      if (pattern.test(s.prompt)) {
+        const users = resourceUsers.get(label) ?? [];
+        users.push(s.index);
+        resourceUsers.set(label, users);
+      }
+    }
+  }
+
+  const depOf = new Set<string>();
+  for (const s of subtasks) {
+    for (const dep of s.dependencies) depOf.add(`${s.index}:${dep}`);
+  }
+
+  for (const [label, users] of resourceUsers) {
+    if (users.length < 2) continue;
+    for (let i = 0; i < users.length; i++) {
+      for (let j = i + 1; j < users.length; j++) {
+        const a = users[i], b = users[j];
+        if (!depOf.has(`${a}:${b}`) && !depOf.has(`${b}:${a}`)) {
+          warnings.push(
+            `Subtasks ${a} and ${b} both use ${label} but are independent — consider adding a dependency edge.`,
+          );
+        }
+      }
+    }
+  }
+  return warnings;
+}
 
 // --- Plan Stage ---
 
@@ -131,6 +206,26 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     },
     outputSchema: PlanSchema,
     approvalRequired: true,
+
+    approvalFormatter: (state, warn) => {
+      if (!state.plan) return '[Plan] No plan generated.';
+      const plan = state.plan;
+
+      const cycle = detectCircularDependencies(
+        plan.subtasks.map(s => ({ index: s.index, dependencies: s.dependencies }))
+      );
+      if (cycle) throw new Error(`Circular dependency: ${cycle.join(' → ')}`);
+
+      for (const w of detectSharedResourceConflicts(plan.subtasks)) {
+        warn(w);
+      }
+
+      let display = formatPlanForDisplay(plan);
+      if (plan.qualityFlag) {
+        display += `\n\n  [Quality] ${plan.qualityFlag.message}`;
+      }
+      return display;
+    },
 
     contextBuilder: (state, outputFile) => ({
       workDir: state.workDir,
