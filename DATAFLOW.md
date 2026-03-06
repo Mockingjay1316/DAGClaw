@@ -3,43 +3,43 @@
 ## High-Level Pipeline Flow
 
 ```
-┌─────────┐     CliOptions      ┌──────────────────┐
-│  cli.ts │ ──────────────────→ │ TaskOrchestrator  │
+┌─────────┐     CliOptions       ┌──────────────────┐
+│  cli.ts │ ──────────────────→  │ TaskOrchestrator │
 │         │     callbacks:       │                  │
-│ parseArgs()  {onStatus,       │  run()           │
-│ main()  │    onWarning,       │  ├→ Plan stage   │
-│ askYesNo()   onApproval}      │  ├→ Execute DAG  │
-│         │ ←─── string msgs ── │  ├→ Verify stage │
-└─────────┘                     │  └→ retryLoop()  │
-                                └────────┬─────────┘
-                                         │
+│ parseArgs()  {onStatus,        │  run()           │
+│ main()  │    onWarning,        │  ├→ Plan stage   │
+│ askYesNo()   onApproval}       │  ├→ Execute DAG  │
+│         │ ←─── string msgs ──  │  ├→ Verify stage │
+└─────────┘                      │  └→ retryLoop()  │
+                                 └────────┬─────────┘
+                                          │
                     ┌────────────────────┬┴──────────────────┬─────────────────┐
-                    ▼                    ▼                    ▼                 ▼
-            ┌──────────────┐  ┌──────────────────┐  ┌─────────────┐  ┌────────────────┐
-            │ claudeRunner │  │ stageDefinitions │  │  runLogger   │  │ memoryManager  │
-            │              │  │                  │  │              │  │                │
-            │ runClaudeCli │  │ BUILTIN_STAGES   │  │ initRun()    │  │ readAll()      │
-            │ buildStage   │  │ Plan/Execute/    │  │ logPrompt()  │  │ buildContext   │
-            │   Prompt()   │  │ Verify configs   │  │ writeVerify()│  │   Block()      │
-            └──────┬───────┘  └──────────────────┘  └──────────────┘  └────────────────┘
-                   │                                        │
-                   ▼                                        ▼
-         ┌─────────────────┐                    ┌─────────────────────┐
-         │ claude -p (CLI) │                    │ .claw/              │
-         │ subprocess      │                    │ ├── runs/<id>/      │
-         └─────────────────┘                    │ ├── tmp/            │
-                                                │ ├── memory/         │
-            ┌──────────────────┐                │ └── lock            │
-            │ dependencyResolver│               └─────────────────────┘
-            │ DependencyResolver│
-            │ detectCircularDeps│
-            └──────────────────┘
-            ┌──────────────┐
-            │ taskManager  │
-            │ acquireLock  │
-            │ releaseLock  │
-            │ checkStale   │
-            └──────────────┘
+                   ▼                    ▼                    ▼                 ▼
+           ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌────────────────┐
+           │ claudeRunner │  │ stageDefinitions │  │  runLogger   │  │ memoryManager  │
+           │              │  │                  │  │              │  │                │
+           │ runClaudeCli │  │ BUILTIN_STAGES   │  │ initRun()    │  │ readAll()      │
+           │ buildStage   │  │ Plan/Execute/    │  │ logPrompt()  │  │ buildContext   │
+           │   Prompt()   │  │ Verify configs   │  │ writeVerify()│  │   Block()      │
+           └──────┬───────┘  └──────────────────┘  └──────────────┘  └────────────────┘
+                  │                                        │
+                  ▼                                        ▼
+        ┌─────────────────┐                    ┌─────────────────────┐
+        │ claude -p (CLI) │                    │ .claw/              │
+        │ subprocess      │                    │ ├── runs/<id>/      │
+        └─────────────────┘                    │ ├── tmp/            │
+                                               │ ├── memory/         │
+           ┌───────────────────┐               │ └── lock            │
+           │ dependencyResolver│               └─────────────────────┘
+           │ DependencyResolver│
+           │ detectCircularDeps│
+           └───────────────────┘
+           ┌──────────────┐
+           │ taskManager  │
+           │ acquireLock  │
+           │ releaseLock  │
+           │ checkStale   │
+           └──────────────┘
 ```
 
 ## Detailed `run()` Sequence — Data Packets at Each Step
@@ -57,7 +57,7 @@ TaskOrchestrator.run()
 │     → returns {branch, commitBefore, commitAfter: null, filesModified: []}
 │
 ├─ 4. logger.initRun(InitRunOptions)
-│     │  ┌─ InitRunOptions ─────────────────────────────┐
+│     │  ┌─ InitRunOptions ──────────────────────────────┐
 │     │  │ prompt: string                                │
 │     │  │ pipeline: ["Plan", "Execute", "Verify"]       │
 │     │  │ backend: "cli"                                │
@@ -75,7 +75,7 @@ TaskOrchestrator.run()
 │     → returns "--- Project Memory ---\n## file.md\n<content>\n..."
 │
 ├─ 7. Build PipelineState (mutable, flows through all stages)
-│     ┌─ PipelineState ─────────────────────────────────────┐
+│     ┌─ PipelineState ──────────────────────────────────────┐
 │     │ prompt: string                                       │
 │     │ workDir: string                                      │
 │     │ plan: Plan | null            ← set by Plan stage     │
@@ -126,19 +126,19 @@ runOne(runId, stage, state, subtask?)
 │     │  ┌──────────────────────────────────────┐
 │     │  │ workDir: "/path/to/project"          │
 │     │  │ prompt: "Build a CLI tool..."        │
-│     │  │ memoryContext: "--- Memory ---\n..."  │
+│     │  │ memoryContext: "--- Memory ---\n..." │
 │     │  │ outputFile: ".claw/tmp/plan.json"    │
 │     │  └──────────────────────────────────────┘
 │     │
 │     │  Execute returns:
-│     │  ┌──────────────────────────────────────────────┐
-│     │  │ workDir: "/path/to/project"                  │
-│     │  │ subtaskPrompt: "Create math.js with add..."  │
-│     │  │ planSummary: "Build 3-file project..."       │
+│     │  ┌───────────────────────────────────────────────┐
+│     │  │ workDir: "/path/to/project"                   │
+│     │  │ subtaskPrompt: "Create math.js with add..."   │
+│     │  │ planSummary: "Build 3-file project..."        │
 │     │  │ predecessorContext: ""                        │
 │     │  │ memoryContext: "--- Memory ---\n..."          │
 │     │  │ outputFile: ".claw/tmp/subtask-0-summary.json"│
-│     │  └──────────────────────────────────────────────┘
+│     │  └───────────────────────────────────────────────┘
 │     │
 │     │  Verify returns:
 │     │  ┌──────────────────────────────────────────────┐
@@ -160,7 +160,7 @@ runOne(runId, stage, state, subtask?)
 │        (retry-numbered: verify-retry-1.md, execute-subtask-1-retry-1.md)
 │
 ├─ 5. runClaudeCli(RunClaudeOptions)
-│     ┌─ RunClaudeOptions ──────────────────────────────────┐
+│     ┌─ RunClaudeOptions ───────────────────────────────────┐
 │     │ prompt: string           (assembled prompt)          │
 │     │ systemPrompt: string     (stage system prompt)       │
 │     │ workDir: string                                      │
@@ -180,19 +180,19 @@ runOne(runId, stage, state, subtask?)
 │     │  Parses last "result" line for usage + sessionId
 │     │
 │     → returns RunClaudeResult
-│       ┌─ RunClaudeResult ────────────────────────┐
+│       ┌─ RunClaudeResult ─────────────────────────┐
 │       │ rawOutput: string   (full stdout)         │
 │       │ sessionId: string   (from result line)    │
 │       │ usage: UsageStats                         │
-│       │   ┌─ UsageStats ──────────────────────┐  │
-│       │   │ inputTokens: 7522                 │  │
-│       │   │ outputTokens: 3107                │  │
-│       │   │ cacheReadTokens: 67348            │  │
-│       │   │ cacheCreationTokens: 10635        │  │
-│       │   │ estimatedCost: 0.129              │  │
-│       │   │ durationMs: 0                     │  │
-│       │   └───────────────────────────────────┘  │
-│       └──────────────────────────────────────────┘
+│       │   ┌─ UsageStats ──────────────────────┐   │
+│       │   │ inputTokens: 7522                 │   │
+│       │   │ outputTokens: 3107                │   │
+│       │   │ cacheReadTokens: 67348            │   │
+│       │   │ cacheCreationTokens: 10635        │   │
+│       │   │ estimatedCost: 0.129              │   │
+│       │   │ durationMs: 0                     │   │
+│       │   └───────────────────────────────────┘   │
+│       └───────────────────────────────────────────┘
 │
 ├─ 6. Log usage + raw output
 │     subtask → logger.updateSubtaskUsage(runId, index, usage)
@@ -231,10 +231,10 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │
 ├─ DependencyResolver(subtasks)
 │    internally builds:
-│    ┌─ state per index ──────────────────────┐
-│    │ 0: {deps: [],    status: "pending"}    │
-│    │ 1: {deps: [],    status: "pending"}    │
-│    │ 2: {deps: [0,1], status: "pending"}    │
+│    ┌─ state per index ───────────────────────┐
+│    │ 0: {deps: [],    status: "pending"}     │
+│    │ 1: {deps: [],    status: "pending"}     │
+│    │ 2: {deps: [0,1], status: "pending"}     │
 │    └─────────────────────────────────────────┘
 │
 ├─ WHILE !resolver.allComplete():
