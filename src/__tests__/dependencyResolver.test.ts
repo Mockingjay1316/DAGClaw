@@ -110,7 +110,7 @@ describe('DependencyResolver', () => {
   });
 
   describe('markSkipped cascades to dependents', () => {
-    it('skips downstream tasks', () => {
+    it('skips downstream tasks and returns cascaded indices', () => {
       const resolver = new DependencyResolver([
         { index: 0, dependencies: [] },
         { index: 1, dependencies: [0] },
@@ -119,11 +119,12 @@ describe('DependencyResolver', () => {
       ]);
 
       resolver.markComplete(0);
-      resolver.markSkipped(1);
+      const cascaded = resolver.markSkipped(1);
 
       // 2 depends on 1 (skipped) so it should also be skipped
       assert.equal(resolver.isSkipped(1), true);
       assert.equal(resolver.isSkipped(2), true);
+      assert.deepEqual(cascaded.sort(), [2]);
 
       // 3 is independent, still ready
       assert.deepEqual(resolver.getReady(), [3]);
@@ -131,7 +132,7 @@ describe('DependencyResolver', () => {
   });
 
   describe('markSkipped cascades through diamond', () => {
-    it('skips transitively through diamond', () => {
+    it('skips transitively through diamond and returns cascaded indices', () => {
       const resolver = new DependencyResolver([
         { index: 0, dependencies: [] },
         { index: 1, dependencies: [0] },
@@ -140,13 +141,27 @@ describe('DependencyResolver', () => {
       ]);
 
       resolver.markComplete(0);
-      resolver.markSkipped(1);
+      const cascaded = resolver.markSkipped(1);
 
       // 3 depends on 1 (skipped), so 3 is skipped
       assert.equal(resolver.isSkipped(3), true);
+      assert.deepEqual(cascaded.sort(), [3]);
       // 2 is independent of 1, still ready
       assert.equal(resolver.isSkipped(2), false);
       assert.deepEqual(resolver.getReady(), [2]);
+    });
+  });
+
+  describe('markSkipped returns empty array for leaf node', () => {
+    it('returns empty when no downstream dependents', () => {
+      const resolver = new DependencyResolver([
+        { index: 0, dependencies: [] },
+        { index: 1, dependencies: [0] },
+      ]);
+
+      resolver.markComplete(0);
+      const cascaded = resolver.markSkipped(1);
+      assert.deepEqual(cascaded, []);
     });
   });
 

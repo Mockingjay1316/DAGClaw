@@ -153,8 +153,8 @@ export interface StageDefinition {
   contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
   /** Zod schema for validating the stage's structured JSON output. */
   outputSchema?: { parse: (data: unknown) => unknown };
-  /** Parse and apply the stage's output to pipeline state. Returns display message. */
-  resultHandler: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition, sessionId?: string) => string;
+  /** Process validated output and update pipeline state. Returns display message. */
+  resultHandler: (state: PipelineState, parsedOutput: unknown | null, subtask?: SubtaskDefinition, sessionId?: string) => string;
   /** Interpret result for pass/fail. */
   resultInterpreter?: (output: unknown) => {
     pass: boolean;

@@ -19,7 +19,7 @@ import { getStageDefinition } from './stageDefinitions.ts';
 import { RunLogger } from './runLogger.ts';
 import { MemoryManager } from './memoryManager.ts';
 import { acquireLock, releaseLock, checkStaleLock } from './taskManager.ts';
-import { buildStagePrompt, checkClaudeCli, runClaudeCli } from './claudeRunner.ts';
+import { buildStagePrompt, checkClaudeCli, runClaudeCli, parseStageOutputFile } from './claudeRunner.ts';
 
 // --- Pure utility functions (exported for testing) ---
 
@@ -86,7 +86,7 @@ export class TaskOrchestrator {
   /** Run the full pipeline. */
   async run(): Promise<{ runId: string; success: boolean }> {
     const stale = checkStaleLock(this.opts.workDir);
-    if (stale) this.warn(`Cleaned up stale lock from PID ${stale}`);
+    if (stale) this.warn(`Cleaned up stale lock from PID ${stale.pid}`);
 
     if (this.opts.backend.type === 'cli' && !checkClaudeCli()) {
       throw new Error('Claude Code CLI not found. Install from https://docs.anthropic.com/claude-code');
@@ -197,7 +197,12 @@ export class TaskOrchestrator {
       this.logger.appendStageLog(runId, stage.name, result.rawOutput);
     }
 
-    return stage.resultHandler(state, outputFile, subtask, result.sessionId);
+    // Validate structured output via declared schema
+    const parsedOutput = stage.outputSchema
+      ? parseStageOutputFile(stage.outputSchema, outputFile)
+      : null;
+
+    return stage.resultHandler(state, parsedOutput, subtask, result.sessionId);
   }
 
   /** Schedule subtasks via DAG, running ready ones in parallel up to maxConcurrency. */
@@ -229,14 +234,11 @@ export class TaskOrchestrator {
         } else {
           const reason = (results[i] as PromiseRejectedResult).reason;
           this.status(`[${stage.name}] [${idx}] Failed: ${reason?.message || 'unknown'}`);
-          resolver.markSkipped(idx);
+          const cascaded = resolver.markSkipped(idx);
           state.skippedIndices.add(idx);
-          // Report cascade
-          for (const s of subtasks) {
-            if (resolver.isSkipped(s.index) && s.index !== idx && !state.skippedIndices.has(s.index)) {
-              state.skippedIndices.add(s.index);
-              this.status(`[${stage.name}] [${s.index}] Skipped (cascade from ${idx})`);
-            }
+          for (const cascadedIdx of cascaded) {
+            state.skippedIndices.add(cascadedIdx);
+            this.status(`[${stage.name}] [${cascadedIdx}] Skipped (cascade from ${idx})`);
           }
         }
       }

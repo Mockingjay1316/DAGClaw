@@ -138,8 +138,8 @@ export class DependencyResolver {
     this.states.set(index, 'complete');
   }
 
-  /** Marks a subtask as skipped and cascades to all downstream dependents. */
-  markSkipped(index: number): void {
+  /** Marks a subtask as skipped and cascades to all downstream dependents. Returns cascaded indices. */
+  markSkipped(index: number): number[] {
     this.assertExists(index);
     this.states.set(index, 'skipped');
 
@@ -147,6 +147,7 @@ export class DependencyResolver {
     for (const dep of downstream) {
       this.states.set(dep, 'skipped');
     }
+    return downstream;
   }
 
   /** Checks if a subtask is skipped. */

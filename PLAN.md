@@ -179,14 +179,13 @@ interface RunClaudeResult {
 | `estimateCost(input, output, cacheRead, cacheCreation)` | USD estimate from token counts (Sonnet 4 pricing) |
 | `parseUsageFromCliOutput(output)` | Extract `UsageStats` from CLI stream-json result line |
 | `checkClaudeCli()` | Check if `claude` binary is on PATH |
-| `buildSnapshotFromOutput(meta, output, sessionId)` | Build a `ContextSnapshot` from executor structured output |
 | `buildStagePrompt(template, context)` | Interpolate `{{placeholders}}` in prompt template |
-| `parseStageOutput(stageName, rawJson)` | Validate JSON string against stage's Zod schema |
-| `parseStageOutputFile(stageName, filePath)` | Read file + validate against Zod schema |
+| `parseStageOutput(schema, rawJson)` | Validate JSON string against a Zod schema |
+| `parseStageOutputFile(schema, filePath)` | Read file + validate against a Zod schema |
 | `runClaudeCli(options)` | Spawn `claude -p`, collect output, parse usage + sessionId |
 
 **Structured output via files (not text parsing):**
-Agents write structured JSON to `.claw/tmp/` files. The orchestrator calls `parseStageOutputFile()` to read and validate via Zod schemas:
+Agents write structured JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates output via each stage's declared `outputSchema` using `parseStageOutputFile()`, then passes the parsed result to `resultHandler`:
 - Plan → `.claw/tmp/plan.json` (PlanSchema)
 - Execute subtask N → `.claw/tmp/subtask-N-summary.json` (ExecutorOutputSchema)
 - Verify → `.claw/tmp/verification.json` (VerificationResultSchema)
@@ -210,7 +209,7 @@ interface PipelineState {
   workDir: string;
   plan: Plan | null;
   subtaskSnapshots: Map<number, ContextSnapshot>;
-  skippedIndices: number[];
+  skippedIndices: Set<number>;
   memoryContext: string;
   verification: VerificationResult | null;
 }
@@ -226,7 +225,7 @@ interface StageDefinition {
   // Lifecycle functions — each stage implements these
   subtaskExtractor?: (state: PipelineState) => SubtaskDefinition[];
   contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
-  resultHandler: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition, sessionId?: string) => string;
+  resultHandler: (state: PipelineState, parsedOutput: unknown | null, subtask?: SubtaskDefinition, sessionId?: string) => string;
 
   // Optional
   resultInterpreter?: (output: any) => { pass: boolean; failedIndices?: number[] };
@@ -236,7 +235,7 @@ interface StageDefinition {
 }
 ```
 
-Each built-in stage (Plan, Execute, Verify) implements `contextBuilder` and `resultHandler`. For example, Plan's `contextBuilder` maps pipeline state to `{workDir, prompt, memoryContext, outputFile}`, and its `resultHandler` parses the plan JSON and sets `state.plan`. Execute's `resultHandler` builds a `ContextSnapshot` and adds it to `state.subtaskSnapshots`. This eliminates stage-specific code from the orchestrator.
+Each built-in stage (Plan, Execute, Verify) implements `contextBuilder` and `resultHandler`. The orchestrator validates structured output via the declared `outputSchema` and passes the parsed result to `resultHandler` — stages never do their own file I/O or parsing. For example, Plan's `contextBuilder` maps pipeline state to `{workDir, prompt, memoryContext, outputFile}`, and its `resultHandler` receives the validated `Plan` object and sets `state.plan`. Execute's `contextBuilder` includes predecessor subtask summaries from `state.subtaskSnapshots` (wired via `subtask.dependencies`), and its `resultHandler` builds a `ContextSnapshot`. This eliminates stage-specific code from the orchestrator.
 
 ### 4. Stage Resolution in TaskOrchestrator
 
@@ -259,7 +258,8 @@ runOne(stage, state, subtask?):
   context = stage.contextBuilder(state, outputFile, subtask)
   prompt = interpolate(stage.runnerConfig.promptTemplate, context)
   result = runClaudeCli(prompt, systemPrompt, ...)
-  message = stage.resultHandler(state, outputFile, subtask, result.sessionId)
+  parsedOutput = stage.outputSchema ? parseStageOutputFile(stage.outputSchema, outputFile) : null
+  message = stage.resultHandler(state, parsedOutput, subtask, result.sessionId)
 ```
 
 There are no stage-specific methods in the orchestrator. All stage differences are expressed through the `StageDefinition` config functions.
@@ -286,10 +286,10 @@ const TestStage: StageDefinition = {
     outputFile,
   }),
 
-  // resultHandler: parse output file, update state, return display message
-  resultHandler: (state, outputFile) => {
-    const result = parseStageOutputFile('Test', outputFile);
-    if (!result) return '[Test] Could not parse test results.';
+  // resultHandler: process validated output, update state, return display message
+  resultHandler: (state, parsedOutput) => {
+    if (!parsedOutput) return '[Test] Could not parse test results.';
+    const result = parsedOutput as { passed: number; failed: number; allPassed: boolean };
     return `[Test] ${result.passed} passed, ${result.failed} failed`;
   },
 
@@ -307,7 +307,7 @@ const TestStage: StageDefinition = {
 
 **Key constraints for custom stages:**
 - `contextBuilder` must return a `Record<string, string>` that matches the `{{placeholders}}` in `promptTemplate`
-- `resultHandler` receives the output file path and must parse it (using the appropriate Zod schema) and update `PipelineState` as needed
+- `resultHandler` receives the validated output (parsed via `outputSchema`) and updates `PipelineState` as needed
 - Parallel stages must provide `subtaskExtractor` to derive subtask list from pipeline state
 - Custom stages have access to the full `PipelineState`, so they can read plan context, predecessor snapshots, memory, etc.
 
@@ -316,6 +316,7 @@ const TestStage: StageDefinition = {
 Topological sort utility for the subtask DAG (used by any stage with `parallel: true`):
 - `getReady()` — returns subtasks whose dependencies are all complete
 - `markComplete(index)` — marks a subtask done
+- `markSkipped(index)` — marks a subtask as skipped, cascades to downstream dependents, returns cascaded indices
 - `allComplete()` — checks if DAG is fully resolved
 
 ### 6. TaskManager (`backend/src/services/taskManager.ts`)

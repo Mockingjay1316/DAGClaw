@@ -16,7 +16,6 @@ import {
   ExecutorOutputSchema,
   VerificationResultSchema,
 } from './types.ts';
-import { parseStageOutputFile } from './claudeRunner.ts';
 import { detectCircularDependencies } from './dependencyResolver.ts';
 
 // --- Plan display & validation helpers (exported for testing) ---
@@ -223,8 +222,8 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       outputFile,
     }),
 
-    resultHandler: (state, outputFile) => {
-      const plan = parseStageOutputFile(PlanSchema, outputFile) as Plan | null;
+    resultHandler: (state, parsedOutput) => {
+      const plan = parsedOutput as Plan | null;
       if (!plan) return '[Plan] Failed to parse plan output.';
 
       const cycle = detectCircularDependencies(
@@ -263,17 +262,32 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       }));
     },
 
-    contextBuilder: (state, outputFile, subtask) => ({
-      workDir: state.workDir,
-      subtaskPrompt: subtask?.prompt ?? '',
-      planSummary: state.plan?.summary ?? '',
-      predecessorContext: '',
-      memoryContext: state.memoryContext,
-      outputFile,
-    }),
+    contextBuilder: (state, outputFile, subtask) => {
+      let predecessorContext = '';
+      if (subtask) {
+        const parts: string[] = [];
+        for (const depIdx of subtask.dependencies) {
+          const snap = state.subtaskSnapshots.get(depIdx);
+          if (snap) {
+            parts.push(`[Subtask ${depIdx}] ${snap.summary || snap.oneliner || '(no summary)'}`);
+          }
+        }
+        if (parts.length > 0) {
+          predecessorContext = 'Predecessor subtask summaries:\n' + parts.join('\n');
+        }
+      }
+      return {
+        workDir: state.workDir,
+        subtaskPrompt: subtask?.prompt ?? '',
+        planSummary: state.plan?.summary ?? '',
+        predecessorContext,
+        memoryContext: state.memoryContext,
+        outputFile,
+      };
+    },
 
-    resultHandler: (state, outputFile, subtask, sessionId) => {
-      const output = parseStageOutputFile(ExecutorOutputSchema, outputFile) as { success: boolean; summary: string; oneliner: string } | null;
+    resultHandler: (state, parsedOutput, subtask, sessionId) => {
+      const output = parsedOutput as { success: boolean; summary: string; oneliner: string } | null;
       const idx = subtask?.index ?? 0;
 
       // Signal failure so DAG runner can cascade-skip dependents
@@ -320,8 +334,8 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
       };
     },
 
-    resultHandler: (state, outputFile) => {
-      const result = parseStageOutputFile(VerificationResultSchema, outputFile) as VerificationResult | null;
+    resultHandler: (state, parsedOutput) => {
+      const result = parsedOutput as VerificationResult | null;
       if (!result) return '[Verify] Could not parse verification result.';
       state.verification = result;
       const { pass, failedIndices } = verifyResultInterpreter(result);
