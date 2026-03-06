@@ -565,20 +565,21 @@ npx claw \
 **Plan approval in CLI**: When `--auto-approve` is not set, the CLI prints the plan and prompts `Approve? (y/n/edit)`. On `n`, it aborts. On `edit`, it opens the plan JSON in `$EDITOR` and re-reads it. On `y`, it continues.
 
 **What's intentionally deferred:**
-- No recursive decomposition yet (subtasks with `needsRecursiveDecomposition` just execute directly)
+- Recursive decomposition is now implemented (subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators)
 - No web UI, REST, or WebSocket
 - No custom stage registration (only built-in Plan/Execute/Verify)
 - No ring buffers or subscription management
 
 ---
 
-### Phase 0.5: Validate Bootstrap (hand-verified) — NEXT
+### End-to-end validation (continuous)
 
-Test the CLI on a trivial task to confirm it works end-to-end:
+End-to-end evaluation is continuous — we always need it, but we cannot exhaust all cases. E2E test scripts live in `test_scripts/` and cover scenarios like hello-world, concurrency, cascade skip, memory, retry, and recursive decomposition. Each new feature should add or update an e2e script. Run them manually to validate real Claude CLI behavior:
+
 ```bash
-node --import tsx bin/claw.js --workdir /tmp/test-project "Create a hello world Express server with TypeScript"
+bash test_scripts/e2e-hello.sh        # basic single-subtask pipeline
+bash test_scripts/e2e-recursive.sh     # recursive decomposition with child orchestrators
 ```
-Verify: plan is generated, subtasks execute, verification passes.
 
 ---
 
@@ -692,8 +693,8 @@ npx claw --workdir . \
 | `TaskOrchestrator` (basic) | Claude Code direct (Phase 0) | ✅ Done |
 | `TaskManager` (minimal) | Claude Code direct (Phase 0) | ✅ Done |
 | CLI entry point | Claude Code direct (Phase 0) | ✅ Done |
-| End-to-end validation | Hand-verified (Phase 0.5) | ⏳ Next |
-| Recursive decomposition | Built by claw (Phase 1) | Not started |
+| End-to-end validation | Continuous (`test_scripts/`) | Ongoing |
+| Recursive decomposition | Built by claw (Phase 1) | ✅ Done |
 | Custom stage support | Built by claw (Phase 2) | Not started |
 | Express + WebSocket backend | Built by claw (Phase 3) | Not started |
 | React frontend | Built by claw (Phase 4) | Not started |
