@@ -32,7 +32,7 @@ You: "Build a REST API with user authentication"
          │
          ▼
    ┌──────────┐     Analyzes codebase, decomposes into subtasks
-   │   Plan    │  →  with dependency graph
+   │   Plan   │  →  with dependency graph
    └────┬─────┘
         ▼
    ┌──────────┐     Runs subtasks in parallel (respecting deps)
