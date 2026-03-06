@@ -39,7 +39,7 @@ A mutable object that flows through every stage. Each stage reads what it needs 
 The key abstraction. Every stage (Plan, Execute, Verify) is defined as a config object with callback functions. The orchestrator never has stage-specific code — it reads these configs and acts generically:
 
 - `contextBuilder` — maps PipelineState → template variables
-- `resultHandler` — parses the output file, updates PipelineState, returns display message
+- `resultHandler` — receives validated output (parsed by orchestrator via `outputSchema`), updates PipelineState, returns display message
 - `subtaskExtractor` — (parallel stages only) extracts subtask list from state
 - `resultInterpreter` — (verify stages) returns pass/fail + failed indices
 - `retryStage` — name of stage to re-run for failed subtasks
@@ -49,7 +49,8 @@ The key abstraction. Every stage (Plan, Execute, Verify) is defined as a config 
 Agents don't return structured data through stdout. Instead:
 1. The prompt tells the agent to write JSON to a specific file path (e.g., `.claw/tmp/plan.json`)
 2. The agent uses the Write tool to create that file
-3. The orchestrator reads and validates the file with a Zod schema
+3. The orchestrator's `runOne()` reads and validates the file via the stage's declared `outputSchema` (Zod)
+4. The validated result is passed to `resultHandler` — stages never do their own file I/O
 
 This is more reliable than parsing text output from Claude.
 
@@ -97,14 +98,15 @@ The most complex file. Has one class (`TaskOrchestrator`) and several utility fu
 - Logs the prompt to disk (for debugging)
 - Spawns Claude via `runClaudeCli()`
 - Logs usage and raw output
-- Calls `stage.resultHandler()` to parse output and update state
+- Validates output file via `stage.outputSchema` (Zod) if declared
+- Passes validated data to `stage.resultHandler()` to update state
 
 Every Claude invocation goes through `runOne`. There are no other paths.
 
 **`runDAG(stage, state, subtasks)`** — parallel execution:
 - Creates a `DependencyResolver` from the subtask list
 - Loops: get ready subtasks → batch up to maxConcurrency → `Promise.allSettled(runOne)` → mark complete/skipped
-- On failure: `markSkipped()` cascades to all downstream dependents
+- On failure: `markSkipped()` cascades to all downstream dependents and returns the cascaded indices
 
 **`retryLoop(stage, state)`** — verification retry:
 - Checks `resultInterpreter` for pass/fail
@@ -113,8 +115,6 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 - All retry results are numbered and preserved on disk
 
 **Utility functions** (pure, exported for testing):
-- `formatPlanForDisplay()` — pretty-prints a plan for the terminal
-- `detectSharedResourceConflicts()` — warns about parallel npm/pip usage
 - `aggregateUsage()` — sums token counts
 - `isGitRepo()`, `getFilesModifiedByGit()` — git helpers
 
@@ -130,7 +130,7 @@ Pure functions + one async executor. No class.
 
 **`buildStagePrompt(template, context)`** — delegates to `interpolateTemplate()`. Replaces `{{key}}` placeholders.
 
-**`parseStageOutput(stageName, raw)`** / **`parseStageOutputFile(stageName, path)`** — validates JSON against the stage's Zod schema. Returns `null` on failure (with stderr logging).
+**`parseStageOutput(schema, raw)`** / **`parseStageOutputFile(schema, path)`** — validates JSON against a Zod schema. Returns `null` on failure (with stderr logging). Called by the orchestrator's `runOne()` using the stage's declared `outputSchema`.
 
 **`estimateCost()`** / **`parseUsageFromCliOutput()`** — token counting and cost estimation using Sonnet 4 pricing.
 
@@ -142,20 +142,21 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
 - System prompt: read-only analysis, decompose into subtasks, evaluate prompt quality
 - Allowed tools: Read, Glob, Grep, Write (Write for the output file only)
 - `contextBuilder`: maps state → {workDir, prompt, memoryContext, outputFile}
-- `resultHandler`: parses plan JSON, sets `state.plan`
+- `resultHandler`: receives validated Plan, runs cycle detection + shared resource conflict warnings, sets `state.plan`
 - `approvalRequired: true` (unless --auto-approve)
+- `approvalFormatter`: pretty-prints the plan for user review
 
 **Execute stage:**
 - System prompt: full tool access, complete the subtask, write summary JSON
 - `parallel: true` — uses DAG scheduling
 - `subtaskExtractor`: pulls subtask list from `state.plan`
-- `contextBuilder`: includes plan summary, predecessor context, memory
-- `resultHandler`: parses executor output, throws on `success: false` (triggers cascade-skip), otherwise stores ContextSnapshot
+- `contextBuilder`: includes plan summary, predecessor subtask summaries (wired via `subtask.dependencies` → `state.subtaskSnapshots`), memory
+- `resultHandler`: receives validated executor output, throws on `success: false` (triggers cascade-skip), otherwise stores ContextSnapshot
 
 **Verify stage:**
 - System prompt: review code, run tests, check each subtask
 - `contextBuilder`: includes plan summary, all subtask summaries, skipped indices
-- `resultHandler`: parses verification result, sets `state.verification`
+- `resultHandler`: receives validated verification result, sets `state.verification`
 - `resultInterpreter`: extracts failed indices where `retryRecommended: true`
 - `retryStage: "Execute"` — on failure, re-run Execute for failed subtasks
 - `maxRetries: 2`
@@ -164,14 +165,13 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
 
 - `interpolateTemplate(template, context)` — simple `{{key}}` replacement
 - `formatSnapshotCompact/Standard()` — formats ContextSnapshots at different detail levels
-- `buildPrompt()` — full assembly: memory → snapshots → task prompt (cache-optimized ordering)
 
 ### `dependencyResolver.ts` — DAG Scheduler
 
 - `DependencyResolver` class: tracks pending/complete/skipped state per subtask index
   - `getReady()` — returns indices whose dependencies are all complete
   - `markComplete(index)` — marks done
-  - `markSkipped(index)` — marks failed, cascades to all downstream dependents
+  - `markSkipped(index)` — marks failed, cascades to all downstream dependents, returns cascaded indices
 - `detectCircularDependencies()` — DFS cycle detection, returns the cycle or null
 
 ### `taskManager.ts` — Lock & Task Factory
@@ -216,7 +216,7 @@ No changes to the orchestrator needed.
 ## Testing
 
 ```bash
-# Unit tests (125 tests, node:test runner)
+# Unit tests (124 tests, node:test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -239,7 +239,7 @@ bash test_scripts/e2e-large-dag.sh    # 5-subtask complex DAG
 
 1. **Stage-agnostic orchestrator** — all stage differences expressed through `StageDefinition` config, not if/else branches
 2. **Single execution primitive** — `runOne()` handles both standalone stages and individual subtasks within parallel stages
-3. **Structured output via files** — agents write JSON to `.claw/tmp/`, orchestrator validates with Zod. More reliable than parsing stdout.
+3. **Structured output via files** — agents write JSON to `.claw/tmp/`, orchestrator validates via each stage's declared `outputSchema` (Zod) and passes parsed data to `resultHandler`. Stages never do their own file I/O.
 4. **Data-driven retry** — `retryStage` field on StageDefinition tells the orchestrator what to re-run. No hardcoded stage names in retry logic.
 5. **Cascade-skip via throw** — Execute `resultHandler` throws on `success: false`, caught by `Promise.allSettled` in DAG runner, which calls `markSkipped()` to cascade.
 6. **Immutable run logs** — every prompt, output, and verification attempt is preserved with numbering. Nothing is overwritten.

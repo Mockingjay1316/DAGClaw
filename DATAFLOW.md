@@ -81,7 +81,7 @@ TaskOrchestrator.run()
 │     │ plan: Plan | null            ← set by Plan stage     │
 │     │ subtaskSnapshots: Map<number, ContextSnapshot>       │
 │     │                              ← set by Execute stage  │
-│     │ skippedIndices: number[]     ← set by DAG runner     │
+│     │ skippedIndices: Set<number>  ← set by DAG runner     │
 │     │ memoryContext: string        ← from MemoryManager    │
 │     │ verification: VerResult|null ← set by Verify stage   │
 │     └──────────────────────────────────────────────────────┘
@@ -99,7 +99,7 @@ TaskOrchestrator.run()
 │     │    → runOne(runId, stage, state)
 │     │
 │     ├─ IF stage.approvalRequired && !autoApprove:
-│     │    → approvePlan(stageName, plan)
+│     │    → requestApproval(stage, state)
 │     │
 │     └─ IF stage.resultInterpreter && state.verification:
 │          → retryLoop(runId, stage, state)
@@ -131,14 +131,16 @@ runOne(runId, stage, state, subtask?)
 │     │  └──────────────────────────────────────┘
 │     │
 │     │  Execute returns:
-│     │  ┌───────────────────────────────────────────────┐
-│     │  │ workDir: "/path/to/project"                   │
-│     │  │ subtaskPrompt: "Create math.js with add..."   │
-│     │  │ planSummary: "Build 3-file project..."        │
-│     │  │ predecessorContext: ""                        │
-│     │  │ memoryContext: "--- Memory ---\n..."          │
-│     │  │ outputFile: ".claw/tmp/subtask-0-summary.json"│
-│     │  └───────────────────────────────────────────────┘
+│     │  ┌────────────────────────────────────────────────────────┐
+│     │  │ workDir: "/path/to/project"                            │
+│     │  │ subtaskPrompt: "Create math.js with add..."            │
+│     │  │ planSummary: "Build 3-file project..."                 │
+│     │  │ predecessorContext: "Predecessor subtask summaries:\n" │
+│     │  │   "[Subtask 0] Created Express app with routes"        │
+│     │  │   (built from subtask.dependencies → subtaskSnapshots) │
+│     │  │ memoryContext: "--- Memory ---\n..."                   │
+│     │  │ outputFile: ".claw/tmp/subtask-0-summary.json"         │
+│     │  └────────────────────────────────────────────────────────┘
 │     │
 │     │  Verify returns:
 │     │  ┌──────────────────────────────────────────────┐
@@ -190,7 +192,6 @@ runOne(runId, stage, state, subtask?)
 │       │   │ cacheReadTokens: 67348            │   │
 │       │   │ cacheCreationTokens: 10635        │   │
 │       │   │ estimatedCost: 0.129              │   │
-│       │   │ durationMs: 0                     │   │
 │       │   └───────────────────────────────────┘   │
 │       └───────────────────────────────────────────┘
 │
@@ -200,24 +201,31 @@ runOne(runId, stage, state, subtask?)
 │     stage   → logger.updateStageUsage(runId, stageName, usage)
 │               logger.appendStageLog(runId, stageName, rawOutput)
 │
-└─ 7. stage.resultHandler(state, outputFile, subtask?, sessionId)
+├─ 7. Validate structured output via declared schema
+│     IF stage.outputSchema:
+│       parsedOutput = parseStageOutputFile(stage.outputSchema, outputFile)
+│       → reads file, validates JSON via Zod schema
+│       → returns parsed object or null on failure
+│     ELSE:
+│       parsedOutput = null
+│
+└─ 8. stage.resultHandler(state, parsedOutput, subtask?, sessionId)
+      │  Receives already-validated data — no file I/O or parsing needed.
       │
       │  Plan handler:
-      │    parseStageOutputFile("Plan", ".claw/tmp/plan.json")
-      │    → validates JSON via PlanSchema (Zod)
+      │    → receives Plan object (validated via PlanSchema)
+      │    → runs detectCircularDependencies, detectSharedResourceConflicts
       │    → sets state.plan
       │    → returns "[Plan] Generated plan: 3 subtask(s) — ..."
       │
       │  Execute handler:
-      │    parseStageOutputFile("Execute", ".claw/tmp/subtask-N-summary.json")
-      │    → validates via ExecutorOutputSchema
+      │    → receives ExecutorOutput (validated via ExecutorOutputSchema)
       │    → IF success=false: throws Error (triggers cascade-skip in DAG)
       │    → sets state.subtaskSnapshots.set(index, ContextSnapshot)
       │    → returns "[Execute] [0] Done: Add math.js module"
       │
       │  Verify handler:
-      │    parseStageOutputFile("Verify", ".claw/tmp/verify.json")
-      │    → validates via VerificationResultSchema
+      │    → receives VerificationResult (validated via VerificationResultSchema)
       │    → sets state.verification
       │    → returns "[Verify] All checks passed." or "[Verify] Failed subtasks: 1"
       │
@@ -251,9 +259,10 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │    └─ FOR each result:
 │         fulfilled → resolver.markComplete(idx)
 │                     status(displayMessage)
-│         rejected  → resolver.markSkipped(idx)
-│                     ← cascade: all downstream also skipped
-│                     state.skippedIndices.push(idx, ...cascaded)
+│         rejected  → cascaded = resolver.markSkipped(idx)
+│                     → returns downstream indices that were cascade-skipped
+│                     state.skippedIndices.add(idx)
+│                     FOR each cascadedIdx: state.skippedIndices.add(cascadedIdx)
 │                     status("[Execute] [2] Skipped (cascade from 0)")
 │
 │  Iteration example (3 subtasks, diamond dep):
@@ -299,7 +308,7 @@ retryLoop(runId, verifyStage, state)
 
 ## Structured Output Schemas (Zod)
 
-Agents write JSON to `.claw/tmp/` files. The orchestrator validates via Zod schemas:
+Agents write JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates via each stage's declared `outputSchema` (Zod), then passes parsed data to `resultHandler`:
 
 ### Plan Output (`plan.json`)
 ```json
