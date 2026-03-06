@@ -79,3 +79,50 @@ describe('parseArgs', () => {
     assert.equal((opts as any).runsLast, true);
   });
 });
+
+describe('dag-stages parsing', () => {
+  it('defaults dagStages to ["Execute"]', () => {
+    const opts = parseArgs(['Do something']);
+    assert.deepEqual(opts.dagStages, ['Execute']);
+  });
+
+  it('parses --dag-stages flag', () => {
+    const opts = parseArgs(['--dag-stages', 'Execute,Lint', 'Do something']);
+    assert.deepEqual(opts.dagStages, ['Execute', 'Lint']);
+  });
+
+  it('trims whitespace in --dag-stages', () => {
+    const opts = parseArgs(['--dag-stages', 'Execute, Lint, Verify', 'Do something']);
+    assert.deepEqual(opts.dagStages, ['Execute', 'Lint', 'Verify']);
+  });
+
+  it('runs subcommand defaults dagStages', () => {
+    const opts = parseArgs(['runs']);
+    assert.deepEqual(opts.dagStages, ['Execute']);
+  });
+});
+
+describe('custom stage loading', () => {
+  it('parseArgs with --pipeline including custom stage names parses correctly', () => {
+    const opts = parseArgs(['--pipeline', 'Plan,Execute,Test,Verify', 'Do something']);
+    assert.deepEqual(opts.pipeline, ['Plan', 'Execute', 'Test', 'Verify']);
+  });
+
+  it('parseArgs preserves whitespace-trimmed custom stage names', () => {
+    const opts = parseArgs(['--pipeline', 'Plan, Execute, Lint, Deploy', 'Do something']);
+    assert.deepEqual(opts.pipeline, ['Plan', 'Execute', 'Lint', 'Deploy']);
+  });
+
+  it('pipeline validation: unknown stages are caught at integration level', () => {
+    // parseArgs itself does NOT validate stage names — it only splits the string.
+    // Validation happens in main() against the loaded stageRegistry.
+    // Here we verify parseArgs happily accepts unknown stage names,
+    // confirming validation must happen downstream.
+    const opts = parseArgs(['--pipeline', 'Plan,NonExistent,Verify', 'Do something']);
+    assert.deepEqual(opts.pipeline, ['Plan', 'NonExistent', 'Verify']);
+
+    // The actual validation in main() would throw:
+    //   `Unknown stage "NonExistent" in pipeline. Available: Plan, Execute, Verify`
+    // This is an integration-level concern tested via the stageRegistry check in cli.ts main().
+  });
+});

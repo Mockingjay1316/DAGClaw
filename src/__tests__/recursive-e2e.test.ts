@@ -142,6 +142,7 @@ describe('Recursive decomposition E2E', () => {
       timeoutSeconds: 300,
       noSummary: false,
       noMemory: false,
+      dagStages: ['Execute'],
     };
 
     const childOpts = buildChildOptions(parentOpts, subtask, 0);
@@ -178,6 +179,7 @@ describe('Recursive decomposition E2E', () => {
       timeoutSeconds: 60,
       noSummary: false,
       noMemory: false,
+      dagStages: ['Execute'],
     };
 
     // At depth 2, should throw since maxDepth is 2
@@ -351,6 +353,7 @@ describe('Recursive decomposition E2E', () => {
       timeoutSeconds: 60,
       noSummary: true,
       noMemory: true,
+      dagStages: ['Execute'],
     };
 
     // We can't access private fields directly, but we can verify the
@@ -433,6 +436,7 @@ describe('Recursive decomposition E2E', () => {
       permissionMode: 'auto' as const,
       autoApprove: false, maxRetries: 0, maxConcurrency: 2,
       maxDepth: 3, timeoutSeconds: 60, noSummary: false, noMemory: false,
+      dagStages: ['Execute'],
     };
 
     const withoutMemory = { ...withMemory, noMemory: true };

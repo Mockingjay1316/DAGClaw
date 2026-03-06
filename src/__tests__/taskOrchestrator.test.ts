@@ -228,6 +228,7 @@ describe('buildChildOptions', () => {
     timeoutSeconds: 300,
     noSummary: false,
     noMemory: false,
+    dagStages: ['Execute'],
   };
 
   const subtask: Subtask = {
@@ -287,6 +288,12 @@ describe('buildChildOptions', () => {
       () => buildChildOptions(parentOpts, subtask, 5),
       { message: /Max recursion depth \(3\) reached/ },
     );
+  });
+
+  it('propagates dagStages from parent', () => {
+    const opts = { ...parentOpts, dagStages: ['Execute', 'Lint'] };
+    const child = buildChildOptions(opts, subtask, 0);
+    assert.deepEqual(child.dagStages, ['Execute', 'Lint']);
   });
 });
 

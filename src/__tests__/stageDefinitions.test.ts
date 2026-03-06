@@ -4,6 +4,7 @@ import {
   BUILTIN_STAGES,
   getStageDefinition,
   verifyResultInterpreter,
+  formatStageDescriptions,
 } from '../stageDefinitions.ts';
 import type { PipelineState } from '../types.ts';
 
@@ -16,6 +17,9 @@ function makePipelineState(overrides?: Partial<PipelineState>): PipelineState {
     skippedIndices: new Set(),
     memoryContext: '',
     verification: null,
+    dagPalette: ['Execute'],
+    postStages: ['Verify'],
+    stageDescriptions: '   - Execute: Full tool access (tools: all)',
     ...overrides,
   };
 }
@@ -199,6 +203,49 @@ describe('stageDefinitions', () => {
     it('throws for unknown stage', () => {
       assert.throws(() => getStageDefinition('Unknown'), /Unknown stage/);
     });
+
+    it('finds custom stages from a custom registry', () => {
+      const customRegistry: Record<string, any> = {
+        ...BUILTIN_STAGES,
+        CustomLint: {
+          name: 'CustomLint',
+          runnerConfig: { systemPrompt: 'Lint it', promptTemplate: '{{workDir}}' },
+          contextBuilder: () => ({}),
+          resultHandler: () => 'done',
+          formatStatus: () => '[CustomLint] Running...',
+        },
+      };
+      const stage = getStageDefinition('CustomLint', customRegistry);
+      assert.equal(stage.name, 'CustomLint');
+    });
+
+    it('lists available stages from custom registry in error message', () => {
+      const customRegistry: Record<string, any> = {
+        Alpha: {
+          name: 'Alpha',
+          runnerConfig: { systemPrompt: '', promptTemplate: '' },
+          contextBuilder: () => ({}),
+          resultHandler: () => '',
+          formatStatus: () => '',
+        },
+        Beta: {
+          name: 'Beta',
+          runnerConfig: { systemPrompt: '', promptTemplate: '' },
+          contextBuilder: () => ({}),
+          resultHandler: () => '',
+          formatStatus: () => '',
+        },
+      };
+      assert.throws(
+        () => getStageDefinition('Missing', customRegistry),
+        (err: Error) => {
+          assert.ok(err.message.includes('Alpha'));
+          assert.ok(err.message.includes('Beta'));
+          assert.ok(!err.message.includes('Plan')); // should NOT list builtin stages
+          return true;
+        },
+      );
+    });
   });
 
   describe('verifyResultInterpreter', () => {
@@ -233,6 +280,155 @@ describe('stageDefinitions', () => {
       assert.equal(interpreted.pass, false);
       // Only index 1 has retryRecommended
       assert.deepEqual(interpreted.failedIndices, [1]);
+    });
+  });
+
+  describe('formatStageDescriptions', () => {
+    it('formats built-in stage descriptions', () => {
+      const desc = formatStageDescriptions(['Execute']);
+      assert.ok(desc.includes('Execute'));
+      assert.ok(desc.includes('tools:'));
+    });
+
+    it('formats multiple stages', () => {
+      const desc = formatStageDescriptions(['Execute', 'Verify']);
+      assert.ok(desc.includes('Execute'));
+      assert.ok(desc.includes('Verify'));
+    });
+
+    it('handles unknown stage gracefully', () => {
+      const desc = formatStageDescriptions(['NonExistent']);
+      assert.ok(desc.includes('NonExistent'));
+      assert.ok(desc.includes('unknown stage'));
+    });
+
+    it('uses custom registry when provided', () => {
+      const registry: Record<string, any> = {
+        Lint: {
+          name: 'Lint',
+          runnerConfig: {
+            systemPrompt: 'You are a linting agent.',
+            promptTemplate: '{{workDir}}',
+            allowedTools: ['Read', 'Bash'],
+          },
+        },
+      };
+      const desc = formatStageDescriptions(['Lint'], registry);
+      assert.ok(desc.includes('Lint'));
+      assert.ok(desc.includes('Read, Bash'));
+    });
+  });
+
+  describe('Plan stage validation', () => {
+    it('Plan contextBuilder includes dagPaletteDescriptions', () => {
+      const state = makePipelineState({
+        stageDescriptions: '   - Execute: test desc (tools: all)',
+        postStages: ['Verify'],
+      });
+      const ctx = BUILTIN_STAGES.Plan.contextBuilder(state, '/tmp/out.json');
+      assert.ok(ctx.dagPaletteDescriptions.includes('Execute'));
+    });
+
+    it('Plan contextBuilder includes postStagesDescription', () => {
+      const state = makePipelineState({ postStages: ['Verify', 'Lint'] });
+      const ctx = BUILTIN_STAGES.Plan.contextBuilder(state, '/tmp/out.json');
+      assert.ok(ctx.postStagesDescription.includes('Verify'));
+      assert.ok(ctx.postStagesDescription.includes('Lint'));
+    });
+
+    it('Plan contextBuilder shows (none) when no post-stages', () => {
+      const state = makePipelineState({ postStages: [] });
+      const ctx = BUILTIN_STAGES.Plan.contextBuilder(state, '/tmp/out.json');
+      assert.ok(ctx.postStagesDescription.includes('none'));
+    });
+
+    it('Plan resultHandler rejects subtask with stage not in palette', () => {
+      const state = makePipelineState({ dagPalette: ['Execute'] });
+      const plan = {
+        summary: 'test',
+        subtasks: [{
+          index: 0, description: 'test', prompt: 'test',
+          dependencies: [], estimatedComplexity: 'low' as const,
+          needsRecursiveDecomposition: false,
+          stage: 'Lint',
+        }],
+        qualityFlag: null,
+        worthDistilling: false,
+      };
+      assert.throws(
+        () => BUILTIN_STAGES.Plan.resultHandler(state, plan),
+        /not in the DAG palette/,
+      );
+    });
+
+    it('Plan resultHandler rejects recursive + non-Execute stage', () => {
+      const state = makePipelineState({ dagPalette: ['Execute', 'Lint'] });
+      const plan = {
+        summary: 'test',
+        subtasks: [{
+          index: 0, description: 'test', prompt: 'test',
+          dependencies: [], estimatedComplexity: 'high' as const,
+          needsRecursiveDecomposition: true,
+          stage: 'Lint',
+        }],
+        qualityFlag: null,
+        worthDistilling: false,
+      };
+      assert.throws(
+        () => BUILTIN_STAGES.Plan.resultHandler(state, plan),
+        /Only "Execute" subtasks can be recursively decomposed/,
+      );
+    });
+
+    it('Plan resultHandler accepts valid plan with stage assignments', () => {
+      const state = makePipelineState({ dagPalette: ['Execute', 'Lint'] });
+      const plan = {
+        summary: 'test plan',
+        subtasks: [
+          {
+            index: 0, description: 'write code', prompt: 'write it',
+            dependencies: [], estimatedComplexity: 'low' as const,
+            needsRecursiveDecomposition: false, stage: 'Execute',
+          },
+          {
+            index: 1, description: 'lint it', prompt: 'lint',
+            dependencies: [0], estimatedComplexity: 'low' as const,
+            needsRecursiveDecomposition: false, stage: 'Lint',
+          },
+        ],
+        qualityFlag: null,
+        worthDistilling: false,
+      };
+      const msg = BUILTIN_STAGES.Plan.resultHandler(state, plan);
+      assert.ok(msg.includes('2 subtask(s)'));
+      assert.equal(state.plan, plan);
+    });
+  });
+
+  describe('Execute subtaskExtractor', () => {
+    it('forwards stage field from plan subtasks', () => {
+      const state = makePipelineState({
+        plan: {
+          summary: 'test',
+          subtasks: [
+            {
+              index: 0, description: 'a', prompt: 'do a',
+              dependencies: [], estimatedComplexity: 'low' as const,
+              needsRecursiveDecomposition: false, stage: 'Lint',
+            },
+            {
+              index: 1, description: 'b', prompt: 'do b',
+              dependencies: [], estimatedComplexity: 'low' as const,
+              needsRecursiveDecomposition: false,
+            },
+          ],
+          qualityFlag: null,
+          worthDistilling: false,
+        },
+      });
+      const subtasks = BUILTIN_STAGES.Execute.subtaskExtractor!(state);
+      assert.equal(subtasks[0].stage, 'Lint');
+      assert.equal(subtasks[1].stage, undefined);
     });
   });
 });
