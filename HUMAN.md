@@ -4,7 +4,7 @@ A reading guide for programmers maintaining this codebase.
 
 ## What This Project Does
 
-Claw UI is a CLI orchestration engine that decomposes software engineering tasks into subtasks and runs them through a **Plan → Execute → Verify** pipeline using Claude Code as the backend. It handles parallel execution via DAG scheduling, automatic retries on verification failure, and persistent logging of every run.
+Claw UI is a CLI orchestration engine that decomposes software engineering tasks into subtasks and runs them through a **Plan → Execute → Verify** pipeline using Claude Code as the backend. It handles parallel execution via DAG scheduling, automatic retries on verification failure, recursive decomposition of complex subtasks, and persistent logging of every run.
 
 ## Source Files at a Glance
 
@@ -47,12 +47,22 @@ The key abstraction. Every stage (Plan, Execute, Verify) is defined as a config 
 ### Structured Output via Files
 
 Agents don't return structured data through stdout. Instead:
-1. The prompt tells the agent to write JSON to a specific file path (e.g., `.claw/tmp/plan.json`)
+1. The prompt tells the agent to write JSON to a run-scoped tmp path (e.g., `.claw/runs/<runId>/tmp/plan.json`)
 2. The agent uses the Write tool to create that file
 3. The orchestrator's `runOne()` reads and validates the file via the stage's declared `outputSchema` (Zod)
 4. The validated result is passed to `resultHandler` — stages never do their own file I/O
 
-This is more reliable than parsing text output from Claude.
+Each orchestrator instance (parent and child) gets its own tmp directory, preventing collisions during recursive runs. Output files are persisted inside the run directory.
+
+### Recursive Decomposition
+
+When the Plan stage marks a subtask with `needsRecursiveDecomposition: true`, the DAG runner spawns a child `TaskOrchestrator` instead of calling `runOne()`:
+1. `shouldRecurse(index, plan)` checks the flag on the plan subtask
+2. `buildChildOptions(parentOpts, subtask, depth)` creates `CliOptions` for the child (auto-approve, same workDir, depth + 1)
+3. A child `TaskOrchestrator` runs its own Plan → Execute → Verify pipeline
+4. The child uses a nested `RunLogger` (logs go under `parent/children/childRunId/`)
+5. The child skips lock management (parent holds the lock)
+6. Depth is limited by `maxDepth` (default: 3)
 
 ## Module-by-Module Guide
 
@@ -105,8 +115,16 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 
 **`runDAG(stage, state, subtasks)`** — parallel execution:
 - Creates a `DependencyResolver` from the subtask list
-- Loops: get ready subtasks → batch up to maxConcurrency → `Promise.allSettled(runOne)` → mark complete/skipped
+- Loops: get ready subtasks → batch up to maxConcurrency → `Promise.allSettled(runOne or runRecursive)` → mark complete/skipped
+- If `shouldRecurse(index, plan)` is true, calls `runRecursive()` instead of `runOne()`
 - On failure: `markSkipped()` cascades to all downstream dependents and returns the cascaded indices
+
+**`runRecursive(runId, stage, state, subtask)`** — recursive decomposition:
+- Creates child `CliOptions` via `buildChildOptions()` (auto-approve, noSummary, depth + 1)
+- Creates a nested `RunLogger` via `logger.createChildLogger(runId)`
+- Spawns a child `TaskOrchestrator` with its own Plan → Execute → Verify pipeline
+- On success: stores a `ContextSnapshot` for downstream subtasks
+- On failure: throws, triggering cascade-skip in the parent DAG
 
 **`retryLoop(stage, state)`** — verification retry:
 - Checks `resultInterpreter` for pass/fail
@@ -117,6 +135,8 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 **Utility functions** (pure, exported for testing):
 - `aggregateUsage()` — sums token counts
 - `isGitRepo()`, `getFilesModifiedByGit()` — git helpers
+- `shouldRecurse(index, plan)` — checks `needsRecursiveDecomposition` flag
+- `buildChildOptions(parentOpts, subtask, depth)` — creates child `CliOptions`
 
 ### `claudeRunner.ts` — Claude CLI Backend
 
@@ -174,18 +194,24 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
   - `markSkipped(index)` — marks failed, cascades to all downstream dependents, returns cascaded indices
 - `detectCircularDependencies()` — DFS cycle detection, returns the cycle or null
 
-### `taskManager.ts` — Lock & Task Factory
+### `taskManager.ts` — Lock, Task Factory & Registry
 
 - `acquireLock(workDir, runId)` — creates `.claw/lock` with PID. Throws if another instance is running.
 - `releaseLock(workDir)` — removes the lock file
 - `checkStaleLock(workDir)` — detects lock from a dead process (checks `process.kill(pid, 0)`), cleans up
-- `createTaskNode(options)` — factory for TaskNode objects (used in future phases)
+- `createTaskNode(options)` — factory for TaskNode objects
+- `TaskRegistry` — tracks parent/child relationships:
+  - `register(node)` / `getNode(id)` — store and retrieve by ID
+  - `addChild(parentId, childNode)` — links parent and child
+  - `getChildren(id)` / `getDescendants(id)` — direct children vs BFS all descendants
+  - `getDepth(id)` — walks parentId chain (root = 0)
+  - `checkDepthLimit(parentId, maxDepth)` — guard against infinite recursion
 
 ### `runLogger.ts` — Persistent Logging
 
 Writes everything to `.claw/runs/<runId>/`:
 
-- `initRun()` — creates directory structure + initial manifest
+- `initRun()` — creates directory structure + initial manifest, sets `currentRunId` for run-scoped tmp
 - `writePlan()` — saves plan JSON
 - `appendSubtaskLog()` — streaming output per subtask (appends)
 - `appendStageLog()` — raw output for Plan/Verify, numbered by attempt
@@ -194,6 +220,8 @@ Writes everything to `.claw/runs/<runId>/`:
 - `updateSubtaskUsage()` / `updateStageUsage()` — updates manifest with token counts
 - `recalcTotals()` — sums perStage + perSubtask into totals
 - `listRuns()` — reads all manifests, returns sorted summaries
+- `createChildLogger(parentRunId)` — creates a nested logger for child runs (logs go under `parent/children/childRunId/`)
+- `cleanTmp()` / `tmpPath()` — run-scoped tmp directories (`.claw/runs/<runId>/tmp/`), isolated per orchestrator instance
 
 ### `memoryManager.ts` — Knowledge Injection
 
@@ -216,7 +244,7 @@ No changes to the orchestrator needed.
 ## Testing
 
 ```bash
-# Unit tests (124 tests, node:test runner)
+# Unit tests (168 tests, node:test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -233,13 +261,14 @@ bash test_scripts/e2e-natural.sh      # open-ended prompt
 bash test_scripts/e2e-stale-lock.sh   # stale lock cleanup
 bash test_scripts/e2e-empty-task.sh   # zero subtasks
 bash test_scripts/e2e-large-dag.sh    # 5-subtask complex DAG
+bash test_scripts/e2e-recursive.sh    # recursive decomposition
 ```
 
 ## Key Design Decisions
 
 1. **Stage-agnostic orchestrator** — all stage differences expressed through `StageDefinition` config, not if/else branches
 2. **Single execution primitive** — `runOne()` handles both standalone stages and individual subtasks within parallel stages
-3. **Structured output via files** — agents write JSON to `.claw/tmp/`, orchestrator validates via each stage's declared `outputSchema` (Zod) and passes parsed data to `resultHandler`. Stages never do their own file I/O.
+3. **Structured output via files** — agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`), orchestrator validates via each stage's declared `outputSchema` (Zod) and passes parsed data to `resultHandler`. Stages never do their own file I/O. Each orchestrator instance gets isolated tmp.
 4. **Data-driven retry** — `retryStage` field on StageDefinition tells the orchestrator what to re-run. No hardcoded stage names in retry logic.
 5. **Cascade-skip via throw** — Execute `resultHandler` throws on `success: false`, caught by `Promise.allSettled` in DAG runner, which calls `markSkipped()` to cascade.
 6. **Immutable run logs** — every prompt, output, and verification attempt is preserved with numbering. Nothing is overwritten.
