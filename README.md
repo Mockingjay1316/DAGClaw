@@ -1,6 +1,6 @@
 # Claw UI
 
-A multi-stage recursive orchestration engine for Claude Code. Decomposes software engineering tasks into subtasks via a **Plan → Execute → Verify** pipeline, running subtasks in parallel via DAG scheduling with automatic retry on verification failure.
+A multi-stage recursive orchestration engine for Claude Code. Decomposes software engineering tasks into subtasks via a **Plan → Execute → Verify** pipeline, running subtasks in parallel via DAG scheduling with automatic retry on verification failure. Includes a CLI for direct terminal use and an Express + WebSocket backend server for remote/programmatic access.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ A multi-stage recursive orchestration engine for Claude Code. Decomposes softwar
 # Install dependencies
 npm install
 
-# Run a task
+# Run a task (CLI)
 node --import tsx bin/claw.js "Add error handling to the auth module"
 
 # With options
@@ -23,6 +23,9 @@ node --import tsx bin/claw.js \
 # View run history
 node --import tsx bin/claw.js runs
 node --import tsx bin/claw.js runs --last
+
+# Start the backend server
+node --import tsx backend/src/index.ts
 ```
 
 ## How It Works
@@ -126,11 +129,84 @@ Every run is persisted to `.claw/runs/<run-id>/`:
     └── <child-run-id>/    # full run structure nested here
 ```
 
+## Backend Server
+
+The backend wraps the orchestration engine in an Express + WebSocket server, enabling remote task management and real-time status updates.
+
+### Starting the Server
+
+```bash
+# Development (no auth, localhost only)
+node --import tsx backend/src/index.ts
+
+# With authentication and restricted access
+CLAW_API_KEY=your-secret-key \
+CLAW_ALLOWED_DIR=/home/user/projects \
+CLAW_CORS_ORIGINS=https://your-frontend.example.com \
+  node --import tsx backend/src/index.ts
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3001` | HTTP/WebSocket server port |
+| `CLAW_API_KEY` | unset (auth disabled) | API key for HTTP (`Authorization: Bearer <key>`) and WebSocket (first-message auth) |
+| `CLAW_ALLOWED_DIR` | `$HOME` | Base directory for workDir validation (blocks path traversal) |
+| `CLAW_CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed CORS origins |
+| `CLAW_MAX_TASKS` | `5` | Maximum concurrent running tasks |
+| `CLAW_MAX_WS_CLIENTS` | `100` | Maximum simultaneous WebSocket connections |
+| `CLAW_RATE_LIMIT_MAX` | `10` | Max task creation requests per IP per minute |
+
+### API Usage
+
+```bash
+# Create a task
+curl -X POST http://localhost:3001/api/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "Add input validation", "workDir": "/home/user/project"}'
+
+# With auth enabled
+curl -X POST http://localhost:3001/api/tasks \
+  -H 'Authorization: Bearer your-secret-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "Add input validation", "workDir": "/home/user/project"}'
+
+# List tasks
+curl http://localhost:3001/api/tasks
+
+# Get task detail
+curl http://localhost:3001/api/tasks/<id>
+
+# Approve a pending plan
+curl -X POST http://localhost:3001/api/tasks/<id>/approve
+
+# Cancel a task
+curl -X DELETE http://localhost:3001/api/tasks/<id>
+```
+
+### WebSocket
+
+Connect to `ws://localhost:3001`. If `CLAW_API_KEY` is set, send `{"type":"auth","token":"<key>"}` as the first message within 5 seconds.
+
+Subscribe to task events:
+```json
+{"type": "subscribe", "nodeIds": ["<task-id>"]}
+```
+
+The server pushes real-time events: `stage_start`, `stage_complete`, `subtask_start`, `subtask_complete`, `approval_required`, `node_status`.
+
 ## Development
 
 ```bash
-# Run unit tests (241 tests, zero deps test runner)
-node --import tsx --test src/__tests__/*.test.ts
+# Core tests (202 tests)
+node --import tsx --test core/__tests__/*.test.ts
+
+# Backend tests (60 tests)
+node --import tsx --test backend/__tests__/*.test.ts
+
+# All tests (262 total)
+node --import tsx --test core/__tests__/*.test.ts backend/__tests__/*.test.ts
 
 # Type check
 npx tsc --noEmit
@@ -157,40 +233,43 @@ bash test_scripts/e2e-dag-stages.sh   # per-subtask stage routing
 ## Architecture
 
 ```
-src/
-├── cli.ts                 CLI entry point, arg parsing, terminal output
-├── taskOrchestrator.ts    Pipeline driver, DAG scheduling, retry loop, recursive decomposition
-├── dagDisplay.ts          Live DAG status display (TTY in-place updates, non-TTY fallback)
-├── claudeRunner.ts        Claude CLI subprocess spawning, output parsing
-├── stageDefinitions.ts    Built-in Plan/Execute/Verify stage configs
-├── configLoader.ts        Custom stage loading from claw.config.json/.ts
-├── promptBuilder.ts       Template interpolation, snapshot formatting
-├── dependencyResolver.ts  Topological sort, cycle detection
-├── taskManager.ts         Lockfile management, task node factory, TaskRegistry
-├── runLogger.ts           Persistent run logging to .claw/runs/
-├── memoryManager.ts       .claw/memory/ read/write
-└── types.ts               All interfaces and Zod schemas
+core/                          Shared orchestration engine
+├── taskOrchestrator.ts        Pipeline driver, DAG scheduling, retry, recursive decomposition
+├── claudeRunner.ts            Claude CLI subprocess spawning, output parsing
+├── stageDefinitions.ts        Built-in Plan/Execute/Verify stage configs
+├── configLoader.ts            Custom stage loading from claw.config.json/.ts
+├── promptBuilder.ts           Template interpolation, snapshot formatting
+├── dependencyResolver.ts      Topological sort, cycle detection
+├── taskManager.ts             Lockfile management, task node factory, TaskRegistry
+├── runLogger.ts               Persistent run logging to .claw/runs/
+├── memoryManager.ts           .claw/memory/ read/write
+└── types.ts                   All interfaces and Zod schemas
+
+cli/                           Terminal interface
+├── cli.ts                     CLI entry point, arg parsing, terminal output
+└── dagDisplay.ts              Live DAG status display
+
+backend/                       Express + WebSocket server
+├── src/
+│   ├── index.ts               Server setup, middleware, security headers
+│   ├── taskStore.ts           In-memory task lifecycle manager
+│   ├── routes/                REST API (tasks, stages)
+│   ├── middleware/            Auth, rate limiting
+│   └── websocket/             WS server, message buffers, subscriptions
+└── __tests__/                 Backend tests (60 tests)
 ```
 
 See [HUMAN.md](HUMAN.md) for a detailed developer guide, [DATAFLOW.md](DATAFLOW.md) for call graphs and data flow diagrams, and [PLAN.md](PLAN.md) for the full system architecture and roadmap.
 
 ## Current Status
 
-**Phase 0: Bootstrap CLI — Complete**
+**Phase 0–2.5: Core Engine — Complete**
 
-All 10 source modules implemented. The CLI orchestrator runs end-to-end: plan decomposition, parallel DAG execution, verification with automatic retry, cascade-skip on failure, persistent logging, and memory injection.
+CLI orchestrator with plan decomposition, parallel DAG execution, verification with automatic retry, cascade-skip, persistent logging, memory injection, recursive decomposition, custom stages, per-subtask stage routing, live DAG display, and cost summary. 202 core unit tests.
 
-**Phase 1: Recursive Decomposition — Complete**
+**Phase 3: Backend Server — Complete**
 
-Subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators with their own Plan → Execute → Verify pipelines. `TaskRegistry` tracks parent/child relationships. Run logs nest under the parent run directory.
-
-**Phase 2: Custom Stages & Pipeline-Aware Planning — Complete**
-
-Custom stages via `claw.config.json`/`.ts`. Per-subtask stage routing in the DAG — the planner can assign different stages (Execute, Lint, Verify, custom) to different subtasks. System prompt interpolation enables injecting pipeline metadata (DAG palette, post-stages) into the planner. `--dag-stages` CLI flag controls which stages the planner can use.
-
-**Phase 2.5: Live DAG Display & Cost Summary — Complete**
-
-Live terminal status display during execution: completed tasks lock at top, running tasks show live elapsed time (updated every 500ms), blocked tasks show their unmet dependencies. TTY mode uses ANSI in-place overwriting; non-TTY falls back to sequential log lines. Tree-format cost summary with per-stage breakdown. Standalone stage ticker for Plan/Verify. 241 unit tests passing.
+Express + WebSocket backend with REST API for task/stage management, real-time WebSocket events, and security hardening (API key auth with timing-safe comparison, rate limiting, path traversal prevention, CORS restriction, WebSocket resource limits, body size cap, generic error responses, security headers). 60 backend tests.
 
 **E2E Validation — Continuous**
 
@@ -204,7 +283,7 @@ E2E test scripts in `test_scripts/` cover core flows: dependency resolution, ret
 | **1** | Recursive decomposition (subtasks spawn child pipelines) | Done |
 | **2** | Custom stages, pipeline-aware planning, per-subtask stage routing | Done |
 | **2.5** | Live DAG display, tree-format cost summary, stage ticker | Done |
-| **3** | Express + WebSocket backend server | Not started |
+| **3** | Express + WebSocket backend server | Done |
 | **4** | React frontend with xterm.js terminals | Not started |
 | **5** | Polish, error handling, responsive UI | Not started |
 
@@ -214,6 +293,7 @@ See [PLAN.md](PLAN.md) for full details on each phase and the future roadmap.
 
 - **Runtime**: Node.js + TypeScript (via tsx, no build step)
 - **Claude integration**: `claude -p` CLI with `--output-format stream-json`
+- **Backend**: Express 5, ws (WebSocket)
 - **Validation**: Zod schemas for all structured agent output
-- **Testing**: `node:test` built-in runner (zero dependencies)
-- **Dependencies**: `tsx`, `zod` (that's it)
+- **Testing**: `node:test` built-in runner (262 tests, zero test dependencies)
+- **Dependencies**: `tsx`, `zod`, `express`, `cors`, `ws`

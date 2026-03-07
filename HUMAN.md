@@ -4,24 +4,42 @@ A reading guide for programmers maintaining this codebase.
 
 ## What This Project Does
 
-Claw UI is a CLI orchestration engine that decomposes software engineering tasks into subtasks and runs them through a **Plan → Execute → Verify** pipeline using Claude Code as the backend. It handles parallel execution via DAG scheduling, automatic retries on verification failure, recursive decomposition of complex subtasks, and persistent logging of every run.
+Claw UI is an orchestration engine that decomposes software engineering tasks into subtasks and runs them through a **Plan → Execute → Verify** pipeline using Claude Code as the backend. It has two interfaces: a CLI for direct terminal use, and an Express + WebSocket backend server for remote/programmatic access. It handles parallel execution via DAG scheduling, automatic retries on verification failure, recursive decomposition of complex subtasks, and persistent logging of every run.
 
 ## Source Files at a Glance
 
 ```
-src/
-├── cli.ts                 Entry point. Parses args, wires up orchestrator, prints output.
-├── taskOrchestrator.ts    The engine. Drives stages, schedules DAGs, handles retries.
-├── dagDisplay.ts          Live DAG status display. TTY/non-TTY rendering, stage ticker.
-├── claudeRunner.ts        Spawns `claude -p` subprocesses, parses output, tracks cost.
-├── stageDefinitions.ts    Stage configs: Plan, Execute, Verify. All stage-specific logic lives here.
-├── configLoader.ts        Custom stage loading from claw.config.json/.ts, merging with builtins.
-├── promptBuilder.ts       Template interpolation and snapshot formatting.
-├── dependencyResolver.ts  Topological sort for the subtask DAG.
-├── taskManager.ts         Lockfile management and task node factory.
-├── runLogger.ts           Writes manifests, logs, prompts, and verification results to disk.
-├── memoryManager.ts       Reads/writes .claw/memory/ markdown files.
-└── types.ts               All interfaces, Zod schemas, and type definitions.
+core/                          Shared orchestration engine
+├── taskOrchestrator.ts        The engine. Drives stages, schedules DAGs, handles retries.
+├── claudeRunner.ts            Spawns `claude -p` subprocesses, parses output, tracks cost.
+├── stageDefinitions.ts        Stage configs: Plan, Execute, Verify. All stage-specific logic lives here.
+├── configLoader.ts            Custom stage loading from claw.config.json/.ts, merging with builtins.
+├── promptBuilder.ts           Template interpolation and snapshot formatting.
+├── dependencyResolver.ts      Topological sort for the subtask DAG.
+├── taskManager.ts             Lockfile management and task node factory.
+├── runLogger.ts               Writes manifests, logs, prompts, and verification results to disk.
+├── memoryManager.ts           Reads/writes .claw/memory/ markdown files.
+└── types.ts                   All interfaces, Zod schemas, and type definitions.
+
+cli/                           Terminal interface
+├── cli.ts                     Entry point. Parses args, wires up orchestrator, prints output.
+└── dagDisplay.ts              Live DAG status display. TTY/non-TTY rendering, stage ticker.
+
+backend/                       Express + WebSocket server
+├── src/
+│   ├── index.ts               Server entry point. Express app, CORS, auth, security headers.
+│   ├── taskStore.ts           In-memory task lifecycle manager. Wraps TaskOrchestrator.
+│   ├── routes/
+│   │   ├── tasks.ts           REST endpoints: create, list, get, approve, reject, cancel tasks.
+│   │   └── stages.ts          REST endpoints: CRUD for custom stage definitions.
+│   ├── middleware/
+│   │   ├── auth.ts            API key authentication (timing-safe comparison).
+│   │   └── rateLimit.ts       Per-IP sliding window rate limiter.
+│   └── websocket/
+│       ├── wsServer.ts        WebSocket server. Auth, subscriptions, broadcasting.
+│       ├── messageBuffer.ts   Per-node ring buffer (1000 messages).
+│       └── subscriptionManager.ts  Bidirectional client-to-node subscription tracking.
+└── __tests__/                 Backend test suite (60 tests).
 ```
 
 ## Core Concepts
@@ -87,7 +105,7 @@ Read this first. Everything else depends on it.
 - `RunManifest` — persistent run metadata written to disk
 - `ContextSnapshot` — summary of what a subtask produced (for downstream context)
 
-### `cli.ts` — Entry Point
+### `cli/cli.ts` — CLI Entry Point
 
 Small file. Four responsibilities:
 1. `parseArgs()` — converts argv into `CliOptions` (including `--dag-stages`)
@@ -96,7 +114,7 @@ Small file. Four responsibilities:
 4. Terminal I/O callbacks (`onStatus`, `onWarning`, `onApprovalRequest`, `onDAGEvent`, `onStageStart`, `onStageEnd`)
 5. `DagDisplay` wiring — routes DAG events to live terminal display, uses `dagAwareLog` to coordinate stdout writes
 
-### `dagDisplay.ts` — Live Terminal Status
+### `cli/dagDisplay.ts` — Live Terminal Status
 
 Renders DAG execution progress in the terminal. Two modes:
 
@@ -112,7 +130,7 @@ Key methods:
 
 Internal rendering pattern: track `mutableLineCount`, erase with cursor-up + clear-line, rewrite. `printedIndices` Set prevents duplicate permanent lines.
 
-### `taskOrchestrator.ts` — The Engine
+### `core/taskOrchestrator.ts` — The Engine
 
 The most complex file. Has one class (`TaskOrchestrator`) and several utility functions.
 
@@ -163,7 +181,7 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 - `shouldRecurse(index, plan)` — checks `needsRecursiveDecomposition` flag
 - `buildChildOptions(parentOpts, subtask, depth)` — creates child `CliOptions`
 
-### `claudeRunner.ts` — Claude CLI Backend
+### `core/claudeRunner.ts` — Claude CLI Backend
 
 Pure functions + one async executor. No class.
 
@@ -179,7 +197,7 @@ Pure functions + one async executor. No class.
 
 **`estimateCost()`** / **`parseUsageFromCliOutput()`** — token counting and cost estimation using Sonnet 4 pricing.
 
-### `stageDefinitions.ts` — Stage Configs
+### `core/stageDefinitions.ts` — Stage Configs
 
 All stage-specific logic lives here. The orchestrator imports `getStageDefinition(name, registry?)` and treats every stage identically.
 
@@ -208,7 +226,7 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
 
 **Helper: `formatStageDescriptions(stageNames, registry?)`** — formats stage names + first line of system prompt + tools for injection into the planner's system prompt.
 
-### `configLoader.ts` — Custom Stage Loading
+### `core/configLoader.ts` — Custom Stage Loading
 
 Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.config.json` (Zod-validated fallback). Merges with `BUILTIN_STAGES` via `mergeStages()`. Reserved names (Plan, Execute, Verify) require `overrideBuiltin: true`.
 
@@ -218,12 +236,12 @@ Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.co
 - `validateStageDefinition(obj)` — validates required fields for TS-sourced stages
 - JSON stages get default `contextBuilder` and `resultHandler` via `makeDefaultContextBuilder()` / `makeDefaultResultHandler()`
 
-### `promptBuilder.ts` — Prompt Assembly
+### `core/promptBuilder.ts` — Prompt Assembly
 
 - `interpolateTemplate(template, context)` — simple `{{key}}` replacement
 - `formatSnapshotCompact/Standard()` — formats ContextSnapshots at different detail levels
 
-### `dependencyResolver.ts` — DAG Scheduler
+### `core/dependencyResolver.ts` — DAG Scheduler
 
 - `DependencyResolver` class: tracks pending/complete/skipped state per subtask index
   - `getReady()` — returns indices whose dependencies are all complete
@@ -231,7 +249,7 @@ Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.co
   - `markSkipped(index)` — marks failed, cascades to all downstream dependents, returns cascaded indices
 - `detectCircularDependencies()` — DFS cycle detection, returns the cycle or null
 
-### `taskManager.ts` — Lock, Task Factory & Registry
+### `core/taskManager.ts` — Lock, Task Factory & Registry
 
 - `acquireLock(workDir, runId)` — creates `.claw/lock` with PID. Throws if another instance is running.
 - `releaseLock(workDir)` — removes the lock file
@@ -244,7 +262,7 @@ Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.co
   - `getDepth(id)` — walks parentId chain (root = 0)
   - `checkDepthLimit(parentId, maxDepth)` — guard against infinite recursion
 
-### `runLogger.ts` — Persistent Logging
+### `core/runLogger.ts` — Persistent Logging
 
 Writes everything to `.claw/runs/<runId>/`:
 
@@ -260,7 +278,7 @@ Writes everything to `.claw/runs/<runId>/`:
 - `createChildLogger(parentRunId)` — creates a nested logger for child runs (logs go under `parent/children/childRunId/`)
 - `cleanTmp()` / `tmpPath()` — run-scoped tmp directories (`.claw/runs/<runId>/tmp/`), isolated per orchestrator instance
 
-### `memoryManager.ts` — Knowledge Injection
+### `core/memoryManager.ts` — Knowledge Injection
 
 Reads `.claw/memory/*.md` files and formats them as a context block injected into prompts:
 - `readAll()` — concatenates all markdown files with headers
@@ -299,11 +317,90 @@ Reads `.claw/memory/*.md` files and formats them as a context block injected int
 
 No changes to the orchestrator needed in any case.
 
+## Backend Server
+
+The backend wraps the core orchestration engine in an Express + WebSocket server for remote/programmatic access.
+
+### Architecture
+
+- **`TaskStore`** manages task lifecycle. Each task wraps a `TaskOrchestrator` instance. The store tracks status transitions (pending → running → completed/failed/cancelled) and forwards `OrchestratorCallbacks` to the WebSocket server for real-time updates.
+- **WebSocket** uses a subscription model: clients subscribe to task IDs (`nodeIds`) and receive events (stage start/end, subtask progress, approval requests). A per-node `MessageBuffer` (ring buffer, 1000 entries) ensures late-joining clients get history.
+- **REST API** handles task CRUD, stage CRUD, and approval/reject flows.
+- **Security** includes API key auth, rate limiting, path traversal prevention, CORS restriction, WebSocket resource limits, body size cap, generic error responses, and security headers.
+
+### REST Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/tasks` | Create a task (prompt, workDir, pipeline, autoApprove) |
+| `GET` | `/api/tasks` | List all tasks |
+| `GET` | `/api/tasks/:id` | Get task detail |
+| `GET` | `/api/tasks/:id/tree` | Get task tree from run manifest |
+| `POST` | `/api/tasks/:id/approve` | Approve a pending plan |
+| `POST` | `/api/tasks/:id/reject` | Reject a pending plan |
+| `DELETE` | `/api/tasks/:id` | Cancel a running task |
+| `GET` | `/api/stages` | List all stages (built-in + custom) |
+| `POST` | `/api/stages` | Create a custom stage |
+| `PUT` | `/api/stages/:name` | Update a custom stage |
+| `DELETE` | `/api/stages/:name` | Delete a custom stage |
+| `GET` | `/api/health` | Health check |
+
+### WebSocket Protocol
+
+Clients connect to `ws://host:port`. If `CLAW_API_KEY` is set, the first message must be `{"type":"auth","token":"<key>"}` (5-second deadline).
+
+**Client → Server:**
+- `{"type":"subscribe","nodeIds":["task-id"]}` — subscribe to task events
+- `{"type":"unsubscribe","nodeIds":["task-id"]}` — unsubscribe
+- `{"type":"approve_plan","taskId":"..."}` — approve a pending plan
+- `{"type":"reject_plan","taskId":"...","feedback":"..."}` — reject with feedback
+- `{"type":"cancel","taskId":"..."}` — cancel a task
+
+**Server → Client** (for subscribed tasks):
+- `{"type":"stage_start","taskId":"...","label":"Plan"}` — stage started
+- `{"type":"stage_complete","taskId":"..."}` — stage ended
+- `{"type":"tree_snapshot","taskId":"...","subtasks":[...]}` — DAG initialized
+- `{"type":"subtask_start","taskId":"...","index":0}` — subtask started
+- `{"type":"subtask_complete","taskId":"...","index":0}` — subtask ended
+- `{"type":"approval_required","taskId":"...","message":"..."}` — plan needs approval
+- `{"type":"node_status","taskId":"...","message":"..."}` — status update
+
+### Configuration (Environment Variables)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3001` | HTTP/WebSocket server port |
+| `CLAW_API_KEY` | unset (auth disabled) | API key for HTTP Bearer auth and WS first-message auth |
+| `CLAW_ALLOWED_DIR` | `$HOME` | Base directory for workDir validation (path traversal prevention) |
+| `CLAW_CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed CORS origins |
+| `CLAW_MAX_TASKS` | `5` | Maximum concurrent running tasks |
+| `CLAW_MAX_WS_CLIENTS` | `100` | Maximum simultaneous WebSocket connections |
+| `CLAW_RATE_LIMIT_MAX` | `10` | Max task creation requests per IP per minute |
+
+### Running the Server
+
+```bash
+# Development (no auth)
+node --import tsx backend/src/index.ts
+
+# Production (with auth)
+CLAW_API_KEY=your-secret-key \
+CLAW_ALLOWED_DIR=/home/user/projects \
+CLAW_CORS_ORIGINS=https://your-frontend.example.com \
+  node --import tsx backend/src/index.ts
+```
+
 ## Testing
 
 ```bash
-# Unit tests (241 tests, node:test runner)
-node --import tsx --test src/__tests__/*.test.ts
+# Core tests (202 tests)
+node --import tsx --test core/__tests__/*.test.ts
+
+# Backend tests (60 tests)
+node --import tsx --test backend/__tests__/*.test.ts
+
+# All tests
+node --import tsx --test core/__tests__/*.test.ts backend/__tests__/*.test.ts
 
 # Type check
 npx tsc --noEmit
