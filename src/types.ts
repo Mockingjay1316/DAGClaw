@@ -254,6 +254,16 @@ export interface RunManifest {
   };
 }
 
+// --- DAG Display Events ---
+
+export type DAGEvent =
+  | { type: 'dag-start'; subtasks: { index: number; description: string; dependencies: number[]; stage: string }[] }
+  | { type: 'subtask-started'; index: number }
+  | { type: 'subtask-completed'; index: number; oneliner: string; elapsed: number }
+  | { type: 'subtask-failed'; index: number; error: string; elapsed: number }
+  | { type: 'subtask-skipped'; index: number; cascadeFrom: number }
+  | { type: 'dag-complete' };
+
 // --- CLI Options ---
 
 export interface CliOptions {

@@ -6,6 +6,8 @@ import {
   isGitRepo,
   shouldRecurse,
   buildChildOptions,
+  formatTokenCount,
+  formatDuration,
 } from '../taskOrchestrator.ts';
 import {
   formatPlanForDisplay,
@@ -13,6 +15,55 @@ import {
 } from '../stageDefinitions.ts';
 import { createTaskNode, TaskRegistry } from '../taskManager.ts';
 import type { Plan, Subtask, UsageStats, CliOptions } from '../types.ts';
+
+// --- formatTokenCount ---
+
+describe('formatTokenCount', () => {
+  it('formats large numbers with k suffix', () => {
+    assert.equal(formatTokenCount(18200), '18.2k');
+  });
+
+  it('formats round thousands', () => {
+    assert.equal(formatTokenCount(5000), '5.0k');
+  });
+
+  it('returns raw number for small values', () => {
+    assert.equal(formatTokenCount(500), '500');
+  });
+
+  it('returns raw number for zero', () => {
+    assert.equal(formatTokenCount(0), '0');
+  });
+
+  it('formats values just at 1000 with k suffix', () => {
+    assert.equal(formatTokenCount(1000), '1.0k');
+  });
+});
+
+// --- formatDuration ---
+
+describe('formatDuration', () => {
+  it('formats minutes and seconds', () => {
+    assert.equal(formatDuration(204300), '3m 24s');
+  });
+
+  it('formats seconds only for short durations', () => {
+    assert.equal(formatDuration(45000), '45s');
+  });
+
+  it('formats zero', () => {
+    assert.equal(formatDuration(0), '0s');
+  });
+
+  it('formats exact minutes', () => {
+    assert.equal(formatDuration(120000), '2m 0s');
+  });
+
+  it('rounds sub-second values', () => {
+    assert.equal(formatDuration(1500), '2s');
+    assert.equal(formatDuration(1400), '1s');
+  });
+});
 
 // --- formatPlanForDisplay ---
 

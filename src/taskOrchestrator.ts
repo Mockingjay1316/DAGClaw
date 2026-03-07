@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   CliOptions,
+  DAGEvent,
   Plan,
   Subtask,
   PipelineState,
@@ -24,6 +25,21 @@ import { acquireLock, releaseLock, checkStaleLock } from './taskManager.ts';
 import { buildStagePrompt, checkClaudeCli, runClaudeCli, parseStageOutputFile } from './claudeRunner.ts';
 
 // --- Pure utility functions (exported for testing) ---
+
+/** Format token count: "18.2k" for >= 1000, raw number otherwise. */
+export function formatTokenCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** Format duration in ms: "3m 24s" or "45s". */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
 
 /** Aggregate multiple UsageStats into a single total. */
 export function aggregateUsage(stats: UsageStats[]): UsageStats {
@@ -91,6 +107,9 @@ export interface OrchestratorCallbacks {
   onApprovalRequest?: (message: string) => Promise<boolean>;
   onStatus?: (message: string) => void;
   onWarning?: (message: string) => void;
+  onDAGEvent?: (event: DAGEvent) => void;
+  onStageStart?: (label: string) => void;
+  onStageEnd?: () => void;
 }
 
 // --- TaskOrchestrator ---
@@ -222,7 +241,16 @@ export class TaskOrchestrator {
     const systemPrompt = buildStagePrompt(stage.runnerConfig.systemPrompt, context);
 
     this.logger.logStagePrompt(runId, stage.name, prompt, systemPrompt, subtask?.index);
-    this.status(stage.formatStatus?.(subtask) ?? `[${stage.name}] Running...`);
+    const statusLabel = stage.formatStatus?.(subtask) ?? `[${stage.name}] Running...`;
+
+    if (subtask && this.cb.onDAGEvent) {
+      // DAG display handles subtask rendering
+    } else if (!subtask && this.cb.onStageStart) {
+      // Standalone stage: start live ticker
+      this.cb.onStageStart(statusLabel);
+    } else {
+      this.status(statusLabel);
+    }
 
     const result = await runClaudeCli({
       prompt,
@@ -233,6 +261,11 @@ export class TaskOrchestrator {
       backend: this.opts.backend,
       dangerouslySkipPermissions: true,  // always skip in CLI -p mode; tools restricted via allowedTools
     });
+
+    // Stop standalone stage ticker
+    if (!subtask && this.cb.onStageEnd) {
+      this.cb.onStageEnd();
+    }
 
     if (subtask !== undefined) {
       this.logger.updateSubtaskUsage(runId, subtask.index, result.usage);
@@ -250,6 +283,10 @@ export class TaskOrchestrator {
     return stage.resultHandler(state, parsedOutput, subtask, result.sessionId);
   }
 
+  private emitDAG(event: DAGEvent): void {
+    this.cb.onDAGEvent?.(event);
+  }
+
   /** Schedule subtasks via DAG, running ready ones in parallel up to maxConcurrency. */
   private async runDAG(
     runId: string,
@@ -259,14 +296,38 @@ export class TaskOrchestrator {
   ): Promise<void> {
     const resolver = new DependencyResolver(subtasks);
     const byIndex = new Map(subtasks.map(s => [s.index, s]));
+    const startTimes = new Map<number, number>();
+    const hasDAGDisplay = !!this.cb.onDAGEvent;
 
     this.status(`[${stage.name}] ${subtasks.length} subtask(s), max concurrency ${this.opts.maxConcurrency}`);
+
+    // Emit dag-start with subtask info from the plan
+    const planSubtasks = state.plan?.subtasks ?? [];
+    this.emitDAG({
+      type: 'dag-start',
+      subtasks: subtasks.map(s => {
+        const planEntry = planSubtasks.find(p => p.index === s.index);
+        return {
+          index: s.index,
+          description: planEntry?.description ?? s.prompt.slice(0, 60),
+          dependencies: s.dependencies,
+          stage: s.stage ?? stage.name,
+        };
+      }),
+    });
 
     while (!resolver.allComplete() && !this.isShuttingDown) {
       const ready = resolver.getReady();
       if (ready.length === 0) break;
 
       const batch = ready.slice(0, this.opts.maxConcurrency);
+
+      // Emit subtask-started for each in batch
+      for (const idx of batch) {
+        startTimes.set(idx, Date.now());
+        this.emitDAG({ type: 'subtask-started', index: idx });
+      }
+
       const results = await Promise.allSettled(
         batch.map(idx => {
           const subtask = byIndex.get(idx)!;
@@ -283,21 +344,29 @@ export class TaskOrchestrator {
 
       for (let i = 0; i < batch.length; i++) {
         const idx = batch[i];
+        const elapsed = Date.now() - (startTimes.get(idx) ?? Date.now());
         if (results[i].status === 'fulfilled') {
           resolver.markComplete(idx);
-          this.status((results[i] as PromiseFulfilledResult<string>).value);
+          const oneliner = (results[i] as PromiseFulfilledResult<string>).value;
+          if (!hasDAGDisplay) this.status(oneliner);
+          this.emitDAG({ type: 'subtask-completed', index: idx, oneliner, elapsed });
         } else {
           const reason = (results[i] as PromiseRejectedResult).reason;
-          this.status(`[${stage.name}] [${idx}] Failed: ${reason?.message || 'unknown'}`);
+          const errorMsg = reason?.message || 'unknown';
+          if (!hasDAGDisplay) this.status(`[${stage.name}] [${idx}] Failed: ${errorMsg}`);
+          this.emitDAG({ type: 'subtask-failed', index: idx, error: errorMsg, elapsed });
           const cascaded = resolver.markSkipped(idx);
           state.skippedIndices.add(idx);
           for (const cascadedIdx of cascaded) {
             state.skippedIndices.add(cascadedIdx);
-            this.status(`[${stage.name}] [${cascadedIdx}] Skipped (cascade from ${idx})`);
+            if (!hasDAGDisplay) this.status(`[${stage.name}] [${cascadedIdx}] Skipped (cascade from ${idx})`);
+            this.emitDAG({ type: 'subtask-skipped', index: cascadedIdx, cascadeFrom: idx });
           }
         }
       }
     }
+
+    this.emitDAG({ type: 'dag-complete' });
   }
 
   /** Recursively decompose a subtask by spawning a child orchestrator. */
@@ -313,7 +382,8 @@ export class TaskOrchestrator {
     const planSubtask = state.plan!.subtasks.find(s => s.index === idx)!;
     const childOpts = buildChildOptions(this.opts, planSubtask, this.depth);
     const childLogger = this.logger.createChildLogger(runId);
-    const child = new TaskOrchestrator(childOpts, this.cb, this.depth + 1, childLogger, this.stageRegistry);
+    const { onDAGEvent: _, onStageStart: _s, onStageEnd: _e, ...childCb } = this.cb;
+    const child = new TaskOrchestrator(childOpts, childCb, this.depth + 1, childLogger, this.stageRegistry);
 
     const result = await child.run();
 
@@ -423,12 +493,36 @@ export class TaskOrchestrator {
   private printCostSummary(runId: string): void {
     try {
       const m = this.logger.readManifest(runId);
-      this.status('\n--- Cost Summary ---');
-      this.status(`  Input tokens:  ${m.usage.totalInputTokens.toLocaleString()}`);
-      this.status(`  Output tokens: ${m.usage.totalOutputTokens.toLocaleString()}`);
-      this.status(`  Cache tokens:  ${m.usage.totalCacheReadTokens.toLocaleString()}`);
-      this.status(`  Estimated cost: $${m.usage.estimatedCost.toFixed(4)}`);
-      if (m.duration) this.status(`  Duration: ${(m.duration / 1000).toFixed(1)}s`);
+      const dur = m.duration ? ` | Duration: ${formatDuration(m.duration)}` : '';
+      this.status(
+        `\n[Cost] Total: ~$${m.usage.estimatedCost.toFixed(2)} | Tokens: ${formatTokenCount(m.usage.totalInputTokens)} in / ${formatTokenCount(m.usage.totalOutputTokens)} out${dur}`
+      );
+
+      // Build per-stage usage from pipeline order, aggregating subtask usage
+      // for parallel stages that only have perSubtask data
+      const stageEntries: { name: string; usage: UsageStats; subtaskCount: number }[] = [];
+      for (const name of m.pipeline) {
+        if (m.usage.perStage[name]) {
+          stageEntries.push({ name, usage: m.usage.perStage[name], subtaskCount: 0 });
+        } else {
+          // Parallel stage: aggregate from perSubtask
+          const subtaskKeys = Object.keys(m.usage.perSubtask);
+          if (subtaskKeys.length > 0) {
+            const subtaskStats = subtaskKeys.map(k => m.usage.perSubtask[Number(k)]);
+            stageEntries.push({ name, usage: aggregateUsage(subtaskStats), subtaskCount: subtaskKeys.length });
+          }
+        }
+      }
+
+      for (let i = 0; i < stageEntries.length; i++) {
+        const { name, usage: s, subtaskCount } = stageEntries[i];
+        const prefix = i < stageEntries.length - 1 ? '|--' : '+--';
+        let line = `  ${prefix} [${name}]    $${s.estimatedCost.toFixed(2)}  (${formatTokenCount(s.inputTokens)} in / ${formatTokenCount(s.outputTokens)} out)`;
+        if (subtaskCount > 0) {
+          line += `  <- ${subtaskCount} subtask${subtaskCount !== 1 ? 's' : ''}`;
+        }
+        this.status(line);
+      }
     } catch { /* best effort */ }
   }
 

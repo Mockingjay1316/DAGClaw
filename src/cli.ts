@@ -7,6 +7,7 @@ import type { CliOptions, RunnerBackend } from './types.ts';
 import { TaskOrchestrator } from './taskOrchestrator.ts';
 import { RunLogger } from './runLogger.ts';
 import { loadAndMergeStages } from './configLoader.ts';
+import { DagDisplay } from './dagDisplay.ts';
 
 // --- Arg parsing (exported for testing) ---
 
@@ -206,10 +207,23 @@ async function main() {
     }
   }
 
+  const dagDisplay = new DagDisplay(process.stdout);
+
+  const dagAwareLog = (msg: string) => {
+    if (dagDisplay.isActive()) {
+      dagDisplay.writeStatus(msg);
+    } else {
+      log(msg);
+    }
+  };
+
   const orchestrator = new TaskOrchestrator(parsed, {
-    onStatus: log,
+    onStatus: dagAwareLog,
     onWarning: warn,
     onApprovalRequest: askYesNo,
+    onDAGEvent: (event) => dagDisplay.handleEvent(event),
+    onStageStart: (label) => dagDisplay.stageStart(label),
+    onStageEnd: () => dagDisplay.stageEnd(),
   }, 0, undefined, stageRegistry);
 
   orchestrator.setupSignalHandlers();
