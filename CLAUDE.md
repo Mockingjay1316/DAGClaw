@@ -48,6 +48,7 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 - `src/stageDefinitions.ts` — Built-in Plan/Execute/Verify stage configs, `formatStageDescriptions()`
 - `src/configLoader.ts` — Custom stage loading from `claw.config.json`/`.ts`, stage merging
 - `src/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, per-subtask stage routing, recursive decomposition
+- `src/dagDisplay.ts` — Live DAG status display (TTY ANSI in-place updates, non-TTY fallback), stage ticker
 - `src/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading
 - `src/runLogger.ts` — Persistent logging to `.claw/runs/`
 - `src/memoryManager.ts` — Memory distillation and injection from `.claw/memory/`

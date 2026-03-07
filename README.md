@@ -129,7 +129,7 @@ Every run is persisted to `.claw/runs/<run-id>/`:
 ## Development
 
 ```bash
-# Run unit tests (213 tests, zero deps test runner)
+# Run unit tests (241 tests, zero deps test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -147,6 +147,11 @@ bash test_scripts/e2e-stale-lock.sh   # stale lock cleanup
 bash test_scripts/e2e-empty-task.sh   # zero subtasks
 bash test_scripts/e2e-large-dag.sh    # 5-subtask complex DAG
 bash test_scripts/e2e-recursive.sh    # recursive decomposition
+bash test_scripts/e2e-cost-summary.sh # tree-format cost summary
+bash test_scripts/e2e-dag-display.sh  # live DAG status display
+bash test_scripts/e2e-custom-stages-json.sh # custom stage via config JSON
+bash test_scripts/e2e-custom-stages-ts.sh   # custom stage via config TS
+bash test_scripts/e2e-dag-stages.sh   # per-subtask stage routing
 ```
 
 ## Architecture
@@ -155,6 +160,7 @@ bash test_scripts/e2e-recursive.sh    # recursive decomposition
 src/
 ├── cli.ts                 CLI entry point, arg parsing, terminal output
 ├── taskOrchestrator.ts    Pipeline driver, DAG scheduling, retry loop, recursive decomposition
+├── dagDisplay.ts          Live DAG status display (TTY in-place updates, non-TTY fallback)
 ├── claudeRunner.ts        Claude CLI subprocess spawning, output parsing
 ├── stageDefinitions.ts    Built-in Plan/Execute/Verify stage configs
 ├── configLoader.ts        Custom stage loading from claw.config.json/.ts
@@ -180,7 +186,11 @@ Subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators with
 
 **Phase 2: Custom Stages & Pipeline-Aware Planning — Complete**
 
-Custom stages via `claw.config.json`/`.ts`. Per-subtask stage routing in the DAG — the planner can assign different stages (Execute, Lint, Verify, custom) to different subtasks. System prompt interpolation enables injecting pipeline metadata (DAG palette, post-stages) into the planner. `--dag-stages` CLI flag controls which stages the planner can use. 213 unit tests passing.
+Custom stages via `claw.config.json`/`.ts`. Per-subtask stage routing in the DAG — the planner can assign different stages (Execute, Lint, Verify, custom) to different subtasks. System prompt interpolation enables injecting pipeline metadata (DAG palette, post-stages) into the planner. `--dag-stages` CLI flag controls which stages the planner can use.
+
+**Phase 2.5: Live DAG Display & Cost Summary — Complete**
+
+Live terminal status display during execution: completed tasks lock at top, running tasks show live elapsed time (updated every 500ms), blocked tasks show their unmet dependencies. TTY mode uses ANSI in-place overwriting; non-TTY falls back to sequential log lines. Tree-format cost summary with per-stage breakdown. Standalone stage ticker for Plan/Verify. 241 unit tests passing.
 
 **E2E Validation — Continuous**
 
@@ -193,6 +203,7 @@ E2E test scripts in `test_scripts/` cover core flows: dependency resolution, ret
 | **0** | Bootstrap CLI orchestrator | Done |
 | **1** | Recursive decomposition (subtasks spawn child pipelines) | Done |
 | **2** | Custom stages, pipeline-aware planning, per-subtask stage routing | Done |
+| **2.5** | Live DAG display, tree-format cost summary, stage ticker | Done |
 | **3** | Express + WebSocket backend server | Not started |
 | **4** | React frontend with xterm.js terminals | Not started |
 | **5** | Polish, error handling, responsive UI | Not started |

@@ -524,61 +524,65 @@ npx claw \
 - `--yolo` / `--auto`: Passes `--dangerously-skip-permissions` to Claude Code instances. Fully autonomous — no user prompts. Use for trusted, well-tested workflows.
 - `--auto-execute`: Hybrid — the Plan stage runs in interactive mode (you review the plan and approve tool uses), but once you approve the plan, Execute and Verify stages run autonomously. Good middle ground for when you trust the plan but want to review it first.
 
-**CLI output** — structured terminal output (no xterm.js needed, just console):
+**CLI output** — live terminal display with TTY in-place updates (non-TTY: sequential log lines):
 ```
-[Plan] Starting plan stage...
-[Plan] Claude is analyzing the task...
-[Plan] Plan generated: 3 subtasks
-  ├── [0] Set up Express routes (low complexity)
-  ├── [1] Implement WebSocket server (medium complexity, depends on 0)
-  └── [2] Wire up task manager (low complexity, depends on 0)
+[Plan] Running... (0s)               ← live elapsed ticker, overwrites in-place
+[Plan] Running... (3s)
+                                      ← ticker cleared when Plan completes
+[Plan] Generated plan: 3 subtask(s) — Set up Express routes | Implement WebSocket | Wire up task manager
+  ├── [0] Set up Express routes (low)
+  ├── [1] Implement WebSocket server (medium, depends on 0)
+  └── [2] Wire up task manager (low, depends on 0)
 [Plan] Approve this plan? (y/n/edit): y
 
-[Execute] Starting execution...
-[Execute] [0] Set up Express routes — running...
-[Execute] [2] Wire up task manager — waiting for [0]
-[Execute] [0] Set up Express routes — completed ✓
-[Execute] [1] Implement WebSocket server — running...
-[Execute] [2] Wire up task manager — running...
-[Execute] [2] Wire up task manager — completed ✓
-[Execute] [1] Implement WebSocket server — completed ✓
+                                      ← Live DAG display (mutable zone):
+[Execute] [0] Set up Express routes -- running... (5s)
+[Execute] [1] Implement WebSocket -- running... (3s)
+  Waiting: [2] blocked on [0, 1]
+                                      ← Running lines overwrite in-place every 500ms
+                                      ← When [0] completes, its line locks permanently above:
 
-[Verify] Starting verification...
-[Verify] Subtask 0: ✓ pass
-[Verify] Subtask 1: ✓ pass
-[Verify] Subtask 2: ✗ fail — missing error handler
-[Verify] Re-executing subtask 2 (attempt 1/3)...
-[Execute] [2] Wire up task manager — running...
-[Execute] [2] Wire up task manager — completed ✓
-[Verify] Re-verifying...
-[Verify] All subtasks: ✓ pass
-[Verify] Integration: ✓ pass
+[Execute] [0] Set up Express routes -- done (12s)
+[Execute] [1] Implement WebSocket -- running... (8s)
+[Execute] [2] Wire up task manager -- running... (5s)
+
+[Execute] [0] Set up Express routes -- done (12s)
+[Execute] [1] Implement WebSocket -- done (15s)
+[Execute] [2] Wire up task manager -- done (10s)
+
+[Verify] Running... (0s)             ← stage ticker for Verify
+[Verify] All checks passed.
 
 ✓ Task completed successfully.
 
 [Cost] Total: ~$0.42 | Tokens: 18.2k in / 12.1k out | Duration: 3m 24s
-  ├── [Plan]    $0.08  (4.1k in / 2.3k out)
-  ├── [Execute] $0.28  (10.5k in / 8.1k out)  ← 3 subtasks
-  └── [Verify]  $0.06  (3.6k in / 1.7k out)
+  |-- [Plan]    $0.08  (4.1k in / 2.3k out)
+  |-- [Execute] $0.28  (10.5k in / 8.1k out)  <- 3 subtasks
+  +-- [Verify]  $0.06  (3.6k in / 1.7k out)
 ```
+
+**Live DAG display** (`src/dagDisplay.ts`): Renders DAG execution progress. TTY mode uses ANSI cursor-up/clear-line codes to overwrite running lines in-place while completed lines stay permanently above. Non-TTY mode prints sequential log lines. A 500ms timer ticks elapsed time on running tasks. `DagDisplay.writeStatus()` coordinates all stdout writes during active display to prevent interleaved output from breaking cursor math. Standalone stages (Plan, Verify) get their own elapsed ticker via `stageStart()`/`stageEnd()`.
 
 **Plan approval in CLI**: When `--auto-approve` is not set, the CLI prints the plan and prompts `Approve? (y/n/edit)`. On `n`, it aborts. On `edit`, it opens the plan JSON in `$EDITOR` and re-reads it. On `y`, it continues.
 
 **What's intentionally deferred:**
-- Recursive decomposition is now implemented (subtasks with `needsRecursiveDecomposition: true` spawn child orchestrators)
 - No web UI, REST, or WebSocket
-- No custom stage registration (only built-in Plan/Execute/Verify)
 - No ring buffers or subscription management
 
 ---
 
 ### End-to-end validation (continuous)
 
-End-to-end evaluation is continuous — we always need it, but we cannot exhaust all cases. E2E test scripts live in `test_scripts/` and cover scenarios like hello-world, concurrency, cascade skip, memory, retry, and recursive decomposition. Each new feature should add or update an e2e script. Run them manually to validate real Claude CLI behavior:
+End-to-end evaluation is continuous — we always need it, but we cannot exhaust all cases. E2E test scripts live in `test_scripts/` and cover scenarios like hello-world, concurrency, cascade skip, memory, retry, recursive decomposition, custom stages, live DAG display, and cost summary. Each new feature should add or update an e2e script. Run them manually to validate real Claude CLI behavior:
 
 ```bash
-bash test_scripts/e2e-hello.sh        # basic single-subtask pipeline
-bash test_scripts/e2e-recursive.sh     # recursive decomposition with child orchestrators
+bash test_scripts/e2e-hello.sh             # basic single-subtask pipeline
+bash test_scripts/e2e-recursive.sh         # recursive decomposition with child orchestrators
+bash test_scripts/e2e-cost-summary.sh      # tree-format cost summary
+bash test_scripts/e2e-dag-display.sh       # live DAG status display
+bash test_scripts/e2e-custom-stages-json.sh # custom stage via claw.config.json
+bash test_scripts/e2e-custom-stages-ts.sh   # custom stage via claw.config.ts
+bash test_scripts/e2e-dag-stages.sh        # per-subtask stage routing
 ```
 
 ---
@@ -696,6 +700,7 @@ npx claw --workdir . \
 | End-to-end validation | Continuous (`test_scripts/`) | Ongoing |
 | Recursive decomposition | Built by claw (Phase 1) | ✅ Done |
 | Custom stages + pipeline-aware planning | Phase 2 | ✅ Done |
+| Live DAG display + cost summary | Phase 2.5 | ✅ Done |
 | Express + WebSocket backend | Built by claw (Phase 3) | Not started |
 | React frontend | Built by claw (Phase 4) | Not started |
 | Polish & integration | Built by claw (Phase 5) | Not started |

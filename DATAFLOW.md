@@ -8,10 +8,20 @@
 │         │     callbacks:       │                  │
 │ parseArgs()  {onStatus,        │  run()           │
 │ main()  │    onWarning,        │  ├→ Plan stage   │
-│ askYesNo()   onApproval}       │  ├→ Execute DAG  │
-│         │ ←─── string msgs ──  │  ├→ Verify stage │
-└─────────┘                      │  └→ retryLoop()  │
-                                 └────────┬─────────┘
+│ askYesNo()   onApproval,       │  ├→ Execute DAG  │
+│         │    onDAGEvent,       │  ├→ Verify stage │
+│         │    onStageStart,     │  └→ retryLoop()  │
+│         │    onStageEnd}       │                  │
+│         │ ←─── string msgs ──  │                  │
+└────┬────┘                      └────────┬─────────┘
+     │                                    │
+     │  ┌──────────────┐                  │
+     └─→│  DagDisplay  │←── DAGEvent ─────┘
+        │              │    (dag-start, subtask-started,
+        │ handleEvent()│     subtask-completed, etc.)
+        │ stageStart() │
+        │ writeStatus()│    Renders live TTY status
+        └──────────────┘    or sequential non-TTY lines
                                           │
                     ┌────────────────────┬┴──────────────────┬─────────────────┐
                    ▼                    ▼                    ▼                 ▼
@@ -242,6 +252,8 @@ runOne(runId, stage, state, subtask?)
 ```
 runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │
+├─ emitDAG({type: 'dag-start', subtasks: [...]})
+│
 ├─ DependencyResolver(subtasks)
 │    internally builds:
 │    ┌─ state per index ───────────────────────┐
@@ -262,6 +274,9 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │    │   subtask.stage? → getStageDefinition(subtask.stage, registry)
 │    │   else           → use parent stage (Execute)
 │    │
+│    ├─ FOR each subtask in batch:
+│    │     emitDAG({type: 'subtask-started', index})
+│    │
 │    ├─ Promise.allSettled(batch.map(runOne or runRecursive))
 │    │   → runs subtasks in parallel up to maxConcurrency
 │    │   → each subtask uses its resolved effectiveStage
@@ -269,12 +284,16 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │    │
 │    └─ FOR each result:
 │         fulfilled → resolver.markComplete(idx)
-│                     status(displayMessage)
-│         rejected  → cascaded = resolver.markSkipped(idx)
+│                     emitDAG({type: 'subtask-completed', index, oneliner, elapsed})
+│         rejected  → emitDAG({type: 'subtask-failed', index, error, elapsed})
+│                     cascaded = resolver.markSkipped(idx)
 │                     → returns downstream indices that were cascade-skipped
 │                     state.skippedIndices.add(idx)
-│                     FOR each cascadedIdx: state.skippedIndices.add(cascadedIdx)
-│                     status("[Execute] [2] Skipped (cascade from 0)")
+│                     FOR each cascadedIdx:
+│                       state.skippedIndices.add(cascadedIdx)
+│                       emitDAG({type: 'subtask-skipped', index: cascadedIdx, cascadeFrom: idx})
+│
+│  emitDAG({type: 'dag-complete'})
 │
 │  Iteration example (3 subtasks, diamond dep):
 │    Iter 1: ready=[0,1] → run both → both complete

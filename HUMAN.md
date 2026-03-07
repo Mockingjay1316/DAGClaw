@@ -12,6 +12,7 @@ Claw UI is a CLI orchestration engine that decomposes software engineering tasks
 src/
 ├── cli.ts                 Entry point. Parses args, wires up orchestrator, prints output.
 ├── taskOrchestrator.ts    The engine. Drives stages, schedules DAGs, handles retries.
+├── dagDisplay.ts          Live DAG status display. TTY/non-TTY rendering, stage ticker.
 ├── claudeRunner.ts        Spawns `claude -p` subprocesses, parses output, tracks cost.
 ├── stageDefinitions.ts    Stage configs: Plan, Execute, Verify. All stage-specific logic lives here.
 ├── configLoader.ts        Custom stage loading from claw.config.json/.ts, merging with builtins.
@@ -92,7 +93,24 @@ Small file. Four responsibilities:
 1. `parseArgs()` — converts argv into `CliOptions` (including `--dag-stages`)
 2. `handleRuns()` — `claw runs` subcommand, reads run history from disk
 3. `main()` — loads custom stages via `loadAndMergeStages()`, validates pipeline against registry, creates `TaskOrchestrator`, calls `run()`
-4. Terminal I/O callbacks (`onStatus`, `onWarning`, `onApprovalRequest`)
+4. Terminal I/O callbacks (`onStatus`, `onWarning`, `onApprovalRequest`, `onDAGEvent`, `onStageStart`, `onStageEnd`)
+5. `DagDisplay` wiring — routes DAG events to live terminal display, uses `dagAwareLog` to coordinate stdout writes
+
+### `dagDisplay.ts` — Live Terminal Status
+
+Renders DAG execution progress in the terminal. Two modes:
+
+- **TTY**: ANSI in-place overwriting. Completed/failed/skipped lines are printed permanently above a "mutable zone" of running tasks + blocked waiting line. Timer ticks elapsed time every 500ms.
+- **Non-TTY**: Sequential log lines on state changes. Running lines reprinted only when the displayed second changes.
+
+Key methods:
+- `handleEvent(DAGEvent)` — processes dag-start, subtask-started/completed/failed/skipped, dag-complete
+- `writeStatus(line)` — external status lines interleaved without breaking mutable zone
+- `stageStart(label)` / `stageEnd()` — standalone stage ticker (Plan, Verify, custom)
+- `isActive()` — true during DAG or stage ticker (used by `dagAwareLog` in cli.ts)
+- `finalize()` — clears timers, prints any remaining entries permanently
+
+Internal rendering pattern: track `mutableLineCount`, erase with cursor-up + clear-line, rewrite. `printedIndices` Set prevents duplicate permanent lines.
 
 ### `taskOrchestrator.ts` — The Engine
 
@@ -139,6 +157,8 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 
 **Utility functions** (pure, exported for testing):
 - `aggregateUsage()` — sums token counts
+- `formatTokenCount(n)` — formats token counts ("18.2k" for large, raw number for small)
+- `formatDuration(ms)` — formats milliseconds ("3m 24s" or "45s")
 - `isGitRepo()`, `getFilesModifiedByGit()` — git helpers
 - `shouldRecurse(index, plan)` — checks `needsRecursiveDecomposition` flag
 - `buildChildOptions(parentOpts, subtask, depth)` — creates child `CliOptions`
@@ -282,7 +302,7 @@ No changes to the orchestrator needed in any case.
 ## Testing
 
 ```bash
-# Unit tests (213 tests, node:test runner)
+# Unit tests (241 tests, node:test runner)
 node --import tsx --test src/__tests__/*.test.ts
 
 # Type check
@@ -300,6 +320,11 @@ bash test_scripts/e2e-stale-lock.sh   # stale lock cleanup
 bash test_scripts/e2e-empty-task.sh   # zero subtasks
 bash test_scripts/e2e-large-dag.sh    # 5-subtask complex DAG
 bash test_scripts/e2e-recursive.sh    # recursive decomposition
+bash test_scripts/e2e-cost-summary.sh # tree-format cost summary
+bash test_scripts/e2e-dag-display.sh  # live DAG status display
+bash test_scripts/e2e-custom-stages-json.sh # custom stage via JSON config
+bash test_scripts/e2e-custom-stages-ts.sh   # custom stage via TS config
+bash test_scripts/e2e-dag-stages.sh   # per-subtask stage routing
 ```
 
 ## Key Design Decisions
@@ -313,3 +338,4 @@ bash test_scripts/e2e-recursive.sh    # recursive decomposition
 7. **System prompt interpolation** — both system prompts and prompt templates are interpolated with `{{key}}` placeholders from `contextBuilder`. Enables runtime injection of pipeline metadata (DAG palette, post-stages) into the planner.
 8. **Per-subtask stage routing** — subtasks can specify a `stage` field to run through different stage definitions. The Plan stage validates stage references against the DAG palette. Only Execute-stage subtasks can be recursively decomposed.
 9. **Custom stages via config** — `claw.config.json` (declarative, Zod-validated) or `claw.config.ts` (full `StageDefinition` with functions). Merged with built-ins at startup. Reserved names protected.
+10. **DagDisplay as sole stdout coordinator** — during active DAG display, all stdout writes go through `DagDisplay.writeStatus()` (via `dagAwareLog` in cli.ts) to prevent interleaved writes from breaking ANSI cursor math.
