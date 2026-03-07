@@ -5,7 +5,7 @@
  * Non-TTY: prints state-change lines sequentially.
  */
 
-import type { DAGEvent } from './types.ts';
+import type { DAGEvent } from '../core/types.ts';
 
 interface DisplayEntry {
   index: number;

@@ -3,10 +3,10 @@
  */
 
 import { createInterface } from 'node:readline';
-import type { CliOptions, RunnerBackend } from './types.ts';
-import { TaskOrchestrator } from './taskOrchestrator.ts';
-import { RunLogger } from './runLogger.ts';
-import { loadAndMergeStages } from './configLoader.ts';
+import type { CliOptions, RunnerBackend } from '../core/types.ts';
+import { TaskOrchestrator } from '../core/taskOrchestrator.ts';
+import { RunLogger } from '../core/runLogger.ts';
+import { loadAndMergeStages } from '../core/configLoader.ts';
 import { DagDisplay } from './dagDisplay.ts';
 
 // --- Arg parsing (exported for testing) ---

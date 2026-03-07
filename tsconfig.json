@@ -13,9 +13,9 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["core/**/*.ts", "cli/**/*.ts", "backend/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

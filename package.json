@@ -7,16 +7,25 @@
     "claw": "./bin/claw.js"
   },
   "scripts": {
-    "test": "node --import tsx --test 'src/__tests__/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "test": "node --import tsx --test 'core/__tests__/*.test.ts' 'cli/__tests__/*.test.ts'",
+    "test:backend": "node --import tsx --test 'backend/__tests__/*.test.ts'",
+    "test:all": "node --import tsx --test 'core/__tests__/*.test.ts' 'cli/__tests__/*.test.ts' 'backend/__tests__/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "server": "node --import tsx backend/src/index.ts"
   },
   "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "tsx": "^4.19.0",
+    "ws": "^8.19.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "@types/node": "^22.0.0"
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.5.0"
   },
   "engines": {
     "node": ">=19.0.0"

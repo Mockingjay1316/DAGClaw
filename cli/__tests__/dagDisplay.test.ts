@@ -2,7 +2,7 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Writable } from 'node:stream';
 import { DagDisplay } from '../dagDisplay.ts';
-import type { DAGEvent } from '../types.ts';
+import type { DAGEvent } from '../../core/types.ts';
 
 /** Create a mock writable stream that captures output. */
 function createMockStream(isTTY = true): Writable & { output: string; isTTY: boolean; columns: number } {

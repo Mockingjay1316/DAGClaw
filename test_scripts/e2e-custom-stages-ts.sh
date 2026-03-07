@@ -21,7 +21,7 @@ echo '{"type": "commonjs"}' > "$TEST_DIR/package.json"
 
 # Create a claw.config.ts with a custom "Review" stage
 cat > "$TEST_DIR/claw.config.ts" << 'TSEOF'
-import type { StageDefinition, PipelineState, SubtaskDefinition } from '../src/types.ts';
+import type { StageDefinition, PipelineState, SubtaskDefinition } from '../core/types.ts';
 
 const ReviewStage: StageDefinition = {
   name: 'Review',
