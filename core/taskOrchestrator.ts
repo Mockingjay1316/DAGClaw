@@ -494,8 +494,9 @@ export class TaskOrchestrator {
     try {
       const m = this.logger.readManifest(runId);
       const dur = m.duration ? ` | Duration: ${formatDuration(m.duration)}` : '';
+      const totalIn = m.usage.totalInputTokens + (m.usage.totalCacheReadTokens ?? 0);
       this.status(
-        `\n[Cost] Total: ~$${m.usage.estimatedCost.toFixed(2)} | Tokens: ${formatTokenCount(m.usage.totalInputTokens)} in / ${formatTokenCount(m.usage.totalOutputTokens)} out${dur}`
+        `\n[Cost] Total: ~$${m.usage.estimatedCost.toFixed(2)} | Tokens: ${formatTokenCount(totalIn)} in / ${formatTokenCount(m.usage.totalOutputTokens)} out${dur}`
       );
 
       // Build per-stage usage from pipeline order, aggregating subtask usage
@@ -517,7 +518,8 @@ export class TaskOrchestrator {
       for (let i = 0; i < stageEntries.length; i++) {
         const { name, usage: s, subtaskCount } = stageEntries[i];
         const prefix = i < stageEntries.length - 1 ? '|--' : '+--';
-        let line = `  ${prefix} [${name}]    $${s.estimatedCost.toFixed(2)}  (${formatTokenCount(s.inputTokens)} in / ${formatTokenCount(s.outputTokens)} out)`;
+        const stageIn = s.inputTokens + (s.cacheReadTokens ?? 0);
+        let line = `  ${prefix} [${name}]    $${s.estimatedCost.toFixed(2)}  (${formatTokenCount(stageIn)} in / ${formatTokenCount(s.outputTokens)} out)`;
         if (subtaskCount > 0) {
           line += `  <- ${subtaskCount} subtask${subtaskCount !== 1 ? 's' : ''}`;
         }
