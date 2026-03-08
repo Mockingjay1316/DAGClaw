@@ -16,7 +16,7 @@ interface LockInfo {
 }
 
 function lockPath(workDir: string): string {
-  return path.join(workDir, '.claw', 'lock');
+  return path.join(workDir, '.dagclaw', 'lock');
 }
 
 function isProcessAlive(pid: number): boolean {

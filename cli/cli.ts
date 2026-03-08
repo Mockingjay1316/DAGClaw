@@ -89,7 +89,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   const prompt = positional.join(' ');
   if (!prompt) {
-    throw new Error('Prompt is required. Usage: claw "your task description"');
+    throw new Error('Prompt is required. Usage: dagclaw "your task description"');
   }
 
   // Validate backend
@@ -194,7 +194,7 @@ async function main() {
     stageRegistry = await loadAndMergeStages(parsed.workDir);
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    warn(`Failed to load claw config: ${errMsg}. Using built-in stages only.`);
+    warn(`Failed to load dagclaw config: ${errMsg}. Using built-in stages only.`);
     stageRegistry = undefined;
   }
 
@@ -245,7 +245,7 @@ async function main() {
 }
 
 // Only run when invoked as entry point (not when imported for testing)
-const isEntryPoint = process.argv[1]?.endsWith('cli.ts') || process.argv[1]?.endsWith('claw.js');
+const isEntryPoint = process.argv[1]?.endsWith('cli.ts') || process.argv[1]?.endsWith('claw.js') || process.argv[1]?.endsWith('dagclaw.js');
 if (isEntryPoint) {
   main();
 }

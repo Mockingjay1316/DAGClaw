@@ -1,8 +1,10 @@
-# Claw UI — System Architecture Plan
+# DAGClaw — System Architecture Plan
 
 ## Context
 
-Claw UI is a local web application for orchestrating multiple Claude Code instances through user-defined multi-stage workflows (e.g., Plan → Execute → Verify). Tasks form a recursive tree — a Plan stage can decompose work into subtasks, each potentially spawning its own sub-workflow. The system manages dependency-aware parallel execution across Claude Code instances with real-time UI updates.
+DAGClaw is a general-purpose multi-stage recursive orchestration engine. It decomposes tasks into subtasks via configurable pipelines (default: Plan → Execute → Verify), running subtasks in parallel via DAG scheduling with greedy dependency resolution. The engine is domain-agnostic — custom stages make it suitable for software engineering, research, content generation, data processing, or any multi-step task with dependencies.
+
+The architecture supports both human-in-the-loop workflows (plan approval, retry choices) and fully agentic loops (an outer agent invokes `dagclaw` as a tool, receives structured results, iterates). The same accountability properties hold in both modes: the plan is inspectable, run logs capture exactly what happened, the DAG structure constrains execution order, and failed runs can be resumed or replayed.
 
 ## Tech Stack
 
@@ -185,10 +187,10 @@ interface RunClaudeResult {
 | `runClaudeCli(options)` | Spawn `claude -p`, collect output, parse usage + sessionId |
 
 **Structured output via files (not text parsing):**
-Agents write structured JSON to `.claw/tmp/` files. The orchestrator's `runOne()` validates output via each stage's declared `outputSchema` using `parseStageOutputFile()`, then passes the parsed result to `resultHandler`:
-- Plan → `.claw/tmp/plan.json` (PlanSchema)
-- Execute subtask N → `.claw/tmp/subtask-N-summary.json` (ExecutorOutputSchema)
-- Verify → `.claw/tmp/verification.json` (VerificationResultSchema)
+Agents write structured JSON to `.dagclaw/tmp/` files. The orchestrator's `runOne()` validates output via each stage's declared `outputSchema` using `parseStageOutputFile()`, then passes the parsed result to `resultHandler`:
+- Plan → `.dagclaw/tmp/plan.json` (PlanSchema)
+- Execute subtask N → `.dagclaw/tmp/subtask-N-summary.json` (ExecutorOutputSchema)
+- Verify → `.dagclaw/tmp/verification.json` (VerificationResultSchema)
 
 **Backend selection logic (v0.1.0):**
 - CLI backend: spawns `claude -p --output-format stream-json` as subprocess. No API key needed — uses Claude Code's own auth.
@@ -303,7 +305,7 @@ const TestStage: StageDefinition = {
 // Use in pipeline: --pipeline "Plan,Execute,Test,Verify"
 ```
 
-**Registration (v0.1.0):** Custom stages are registered programmatically by adding to `BUILTIN_STAGES`. In v0.2+, users will be able to define stages in a `claw.config.json` file in their project root, which the CLI loads on startup.
+**Registration (v0.1.0):** Custom stages are registered programmatically by adding to `BUILTIN_STAGES`. In v0.2+, users will be able to define stages in a `dagclaw.config.json` file in their project root, which the CLI loads on startup.
 
 **Key constraints for custom stages:**
 - `contextBuilder` must return a `Record<string, string>` that matches the `{{placeholders}}` in `promptTemplate`
@@ -456,7 +458,7 @@ The key insight: **Phase 0 builds the orchestrator as a CLI tool, then Phases 1+
 
 Phase 0 is hand-written (~7 files, minimal). Once it works, we feed it prompts like:
 ```bash
-npx claw "Build the Express + WebSocket backend server for Claw UI per PLAN.md"
+npx claw "Build the Express + WebSocket backend server for DAGClaw per PLAN.md"
 ```
 and it Plans → Executes → Verifies autonomously.
 
@@ -580,8 +582,8 @@ bash test_scripts/e2e-hello.sh             # basic single-subtask pipeline
 bash test_scripts/e2e-recursive.sh         # recursive decomposition with child orchestrators
 bash test_scripts/e2e-cost-summary.sh      # tree-format cost summary
 bash test_scripts/e2e-dag-display.sh       # live DAG status display
-bash test_scripts/e2e-custom-stages-json.sh # custom stage via claw.config.json
-bash test_scripts/e2e-custom-stages-ts.sh   # custom stage via claw.config.ts
+bash test_scripts/e2e-custom-stages-json.sh # custom stage via dagclaw.config.json
+bash test_scripts/e2e-custom-stages-ts.sh   # custom stage via dagclaw.config.ts
 bash test_scripts/e2e-dag-stages.sh        # per-subtask stage routing
 ```
 
@@ -606,7 +608,7 @@ npx claw --workdir . --auto-approve \
 ```bash
 npx claw --workdir . \
   "Add custom stage definition support. Users should be able to define
-   custom StageDefinitions in a claw.config.json file in their project
+   custom StageDefinitions in a dagclaw.config.json file in their project
    root. The CLI should load these and make them available in --pipeline.
    Refer to PLAN.md section 'Stage Definitions' for the StageDefinition
    interface."
@@ -618,7 +620,7 @@ npx claw --workdir . \
 
 ```bash
 npx claw --workdir . \
-  "Build the Express + WebSocket backend server for Claw UI.
+  "Build the Express + WebSocket backend server for DAGClaw.
    Move the core engine (claudeRunner, taskOrchestrator, etc.) into
    a shared core/ directory. Create backend/ with Express server,
    REST routes for tasks and stages, and WebSocket server with
@@ -660,7 +662,7 @@ claw_ui/
 
 ```bash
 npx claw --workdir . \
-  "Build the React + Vite frontend for Claw UI.
+  "Build the React + Vite frontend for DAGClaw.
    Scaffold with Vite + React-TS. Add Tailwind CSS, xterm.js, Zustand.
    Build components: Sidebar, CreateTaskForm, TaskTreeView, TaskTreeNode,
    StageIndicator, DetailPanel, PlanView, ExecutionView, SubtaskTerminal,
@@ -675,7 +677,7 @@ npx claw --workdir . \
 
 ```bash
 npx claw --workdir . \
-  "Polish the Claw UI application:
+  "Polish the DAGClaw application:
    1. Add error handling for SDK failures, WebSocket disconnects, reconnection logic
    2. Add cancellation propagation (cancel root → cancel all descendants)
    3. Add concurrency tuning (MAX_CONCURRENT_INSTANCES env var)
@@ -720,8 +722,8 @@ npx claw --workdir . \
 | Max tree depth limit | `MAX_DEPTH=3` | Prevents runaway recursive decomposition |
 | Retries at subtask level | Only failed subtasks re-execute | Avoids re-running successful work |
 | Interactive permissions by default | Claude Code asks before every tool use | Safety first — user sees and approves all actions; `--yolo` opts into full auto |
-| Persistent run logs from v0.1.0 | `.claw/runs/` with manifest + per-subtask logs | History available from day one; web viewer reuses same components later |
-| Memory distilled from logs | `.claw/memory/` is derived, `.claw/runs/` is source of truth | Raw logs for accountability, memory for evolving intelligence; user can edit both |
+| Persistent run logs from v0.1.0 | `.dagclaw/runs/` with manifest + per-subtask logs | History available from day one; web viewer reuses same components later |
+| Memory distilled from logs | `.dagclaw/memory/` is derived, `.dagclaw/runs/` is source of truth | Raw logs for accountability, memory for evolving intelligence; user can edit both |
 | Concurrency via Plan stage | Claude Code reasons about file conflicts during planning | Minimal structural changes; existing `dependencies` field sufficient; no `touchesFiles` annotation needed |
 | Context snapshots, not session chaining | Each subtask owns its session; context flows via snapshots injected into prompts | Sessions can't fork/merge; snapshots enable clean parallel branching and DAG accumulation |
 | Cache-optimized prompt ordering | System → memory → plan → snapshots → task prompt | Shared prefix cached at ~90% discount; ~80% cache rate on typical DAGs |
@@ -750,7 +752,7 @@ Every `claw` run is recorded locally for later review. This is available from v0
 ### Storage Layout
 
 ```
-.claw/
+.dagclaw/
 ├── runs/
 │   ├── 2026-03-04T14-30-00_abc123/       # timestamp + short ID
 │   │   ├── manifest.json                  # run metadata, status, timing, tree structure
@@ -817,10 +819,10 @@ npx claw runs <run-id> --log 2   # cat the full output log for subtask 2
 ```
 
 ### Web UI integration (Phase 4+)
-The frontend adds a "Run History" view that reads from `.claw/runs/`. Each run is expandable to show the full task tree, plan, subtask outputs (rendered in xterm.js for ANSI support), and verification results. This reuses the same `TaskTreeView` and `SubtaskTerminal` components — they just read from disk instead of a live WebSocket.
+The frontend adds a "Run History" view that reads from `.dagclaw/runs/`. Each run is expandable to show the full task tree, plan, subtask outputs (rendered in xterm.js for ANSI support), and verification results. This reuses the same `TaskTreeView` and `SubtaskTerminal` components — they just read from disk instead of a live WebSocket.
 
 ### Retention
-- Default: keep last 50 runs (configurable in `.claw/config.json`)
+- Default: keep last 50 runs (configurable in `.dagclaw/config.json`)
 - Oldest runs auto-pruned on new run start
 - `npx claw runs --clean` to manually prune
 
@@ -833,7 +835,7 @@ Memory is a **derived layer** on top of raw run logs — not a replacement. Raw 
 ### How it works
 
 ```
-Raw logs (.claw/runs/)          Memory (.claw/memory/)
+Raw logs (.dagclaw/runs/)          Memory (.dagclaw/memory/)
 ┌──────────────────┐           ┌──────────────────┐
 │ run 1 logs       │──distill──▶ codebase.md      │
 │ run 2 logs       │──distill──▶ patterns.md      │
@@ -850,7 +852,7 @@ Raw logs (.claw/runs/)          Memory (.claw/memory/)
 ### Storage
 
 ```
-.claw/
+.dagclaw/
 ├── runs/              # raw logs (source of truth, never modified)
 ├── memory/
 │   ├── index.md       # summary of what memory files exist and when last updated
@@ -864,7 +866,7 @@ Raw logs (.claw/runs/)          Memory (.claw/memory/)
 
 1. **After each run completes**, the orchestrator runs a lightweight **memory distillation step**: a Claude Code instance reads the run's plan, execution output, and verification results, then updates the relevant memory files. This is a short, focused prompt: "Given this run's results, update the project memory files with any new learnings."
 
-2. **Before each run starts**, the orchestrator reads `.claw/memory/` and injects relevant content into the Claude Code instances' system context. The Plan stage gets all memory (to inform decomposition); Execute subtasks get memory relevant to their scope.
+2. **Before each run starts**, the orchestrator reads `.dagclaw/memory/` and injects relevant content into the Claude Code instances' system context. The Plan stage gets all memory (to inform decomposition); Execute subtasks get memory relevant to their scope.
 
 3. **Memory evolves**: each distillation can update, consolidate, or prune memory entries. Old patterns get refined, outdated info gets removed. The memory files stay concise.
 
@@ -883,7 +885,7 @@ Raw logs (.claw/runs/)          Memory (.claw/memory/)
 - Anything the user explicitly deletes
 
 ### Memory in the web UI (Phase 4+)
-The frontend adds a "Memory" panel where users can browse and edit `.claw/memory/` files. Shows when each entry was last updated and which run it originated from.
+The frontend adds a "Memory" panel where users can browse and edit `.dagclaw/memory/` files. Shows when each entry was last updated and which run it originated from.
 
 ---
 
@@ -936,7 +938,7 @@ The prompt is ordered so the shared prefix maximizes Anthropic's prompt caching 
 ```
 ┌──────────────────────────────┐
 │ System prompt                │ ← identical across ALL subtasks (always cached)
-│ Memory (.claw/memory/)       │ ← identical within a run (cached after 1st subtask)
+│ Memory (.dagclaw/memory/)       │ ← identical within a run (cached after 1st subtask)
 │ Plan snapshot                │ ← identical for all Execute subtasks (cached)
 ├──────────────────────────────┤ ← cache breaks here
 │ Predecessor snapshots        │ ← varies per subtask
@@ -1032,7 +1034,7 @@ In `--yolo` mode, the system auto-escalates: resume retries → clean slate → 
 
 The web UI's run history view includes a "Resume" action on completed/failed runs. This creates a new run that:
 - Reconstructs context snapshots from the previous run's log
-- Injects memory from `.claw/memory/` for accumulated learnings
+- Injects memory from `.dagclaw/memory/` for accumulated learnings
 - Pre-populates the DAG state — completed subtasks keep their snapshots, failed subtask gets a fresh start
 
 This gives users a natural "pick up where I left off" workflow.
@@ -1046,16 +1048,23 @@ Features identified but explicitly deferred:
 | Feature | Version | Notes |
 |---------|---------|-------|
 | Execute-level retry | v0.1.1 | DAG runner retries failed subtasks before cascade-skipping. Stage config `maxAttempts` controls retry count. Executor output gains `retryWorthy: boolean` — agents signal whether failure is transient (network, flaky test) vs permanent (permission denied, missing prereq). DAG runner skips retry when `retryWorthy: false`. |
-| Advanced context management | v0.2+ | Relevance scoring (file overlap), on-demand context tool, context compression for deep DAGs, toxicity detection |
-| Git worktree isolation | v0.2+ | Optional per-subtask worktree for conflict-free parallel execution |
+| Memory distillation pipeline | v0.1.1 | Activate dead `worthDistilling` flag. After successful run where `plan.worthDistilling === true`, run a distillation Claude CLI call that reads plan + subtask summaries + verification result and generates a memory entry. New `core/memoryDistiller.ts` (~100 lines), minor hook in `taskOrchestrator.ts`. |
+| Advanced context management | v0.2+ | Context budget enforcement in `runOne()` — add `contextBudget` to CliOptions, enforce after prompt assembly. Over budget: drop snapshots (compact tier first, oldest transitive deps). ~50-80 lines in `promptBuilder.ts`. Future: relevance scoring (file overlap), on-demand context tool, context compression for deep DAGs, toxicity detection. |
+| Sandbox abstraction | v0.2+ | Expanded from git worktree isolation. `sandbox?: 'shared' \| 'worktree'` on SubtaskSchema (planner decides per-subtask). New `core/sandboxManager.ts` (~200 lines) for worktree lifecycle. Docker deferred — worktree covers 90% of code task use cases. |
+| Plan replay / dry run | v0.2+ | `--plan <runId>`: load plan.json from previous run, skip Plan stage. `--dry-run`: run Plan stage only, display plan, exit. ~50 lines in cli.ts and taskOrchestrator.ts. Unique advantage over emergent-execution systems. |
+| Per-subtask resume | v0.2+ | On run failure, manifest records which subtasks completed successfully. `--resume <runId>`: reload plan, skip completed subtasks, re-run from failure point. More granular than plan replay — avoids re-running successful work. ~80 lines in taskOrchestrator.ts. Inspired by Lobster's checkpoint tokens. |
+| Stage lifecycle hooks | v0.2+ | `preRun?` and `postRun?` optional hooks on StageDefinition. NOT middleware — two hooks only. Orchestrator stays stage-agnostic. ~30 lines. |
+| External task runner | v0.2+ | `runner: 'claude' \| 'external'` discriminator on StageRunnerConfig. New `runExternal()` in claudeRunner.ts (~150 lines). Shell commands with streaming stdout/stderr capture to log files. Verify stage references external run output for validation. |
 | CI integration | v0.2+ | Trigger a templated task pipeline on CI failure (just another task, no special handling) |
-| Shareable skill packs (`claw.skills/`) | v0.2+ | Reusable StageDefinition presets, shareable across projects |
+| Shareable stage presets | v0.2+ | Reframed from skill packs. Importable config fragments (`dagclaw.presets/`) for reusable StageDefinition bundles. No separate skills system — memory + custom stages + plan replay cover all use cases. |
+| Per-subtask tool scoping | v0.3+ | Planner restricts allowed tools per subtask via `allowedTools` field in SubtaskSchema. |
+| Structured memory with tags | v0.3+ | Frontmatter tags in `.dagclaw/memory/*.md`, `--memory-dir` flag, tag-based filtering for context injection. |
+| Run comparison / diff | v0.3+ | `dagclaw diff <id1> <id2>` — compare plans, costs, outcomes between two runs. |
 | Native Agent Teams integration | v0.3+ | Use Claude Code's built-in swarm as an optional Execute backend |
 | Messaging platform integration | v0.3+ | Trigger runs from Slack/Discord/Telegram, receive status updates |
 | Heartbeat/cron scheduling | v0.3+ | Useful when managing large worker trees on long-running projects |
 | Distributed deployment | v0.4+ | Remote executors for compute-heavy subtasks, worker node management |
-| Community tool ecosystem | v0.4+ | Community-contributed stages, skill packs, integrations |
-| External task runner | v0.2+ | New `ExternalRun` stage type for long-running shell commands (compile, render, benchmark) outside Claude CLI. Configurable timeout per stage, streaming stdout/stderr capture to log files, Verify stage references external run output for validation. |
+| Community tool ecosystem | v0.4+ | Community-contributed stages, presets, integrations |
 
 ---
 

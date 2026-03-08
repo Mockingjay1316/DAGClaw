@@ -14,7 +14,7 @@ import os from 'node:os';
 import type { Plan, VerificationResult } from '../types.ts';
 
 // The orchestrator calls runClaudeCli, which writes to run-scoped tmp dirs
-// (.claw/runs/<runId>/tmp/), then parseStageOutputFile reads from that path.
+// (.dagclaw/runs/<runId>/tmp/), then parseStageOutputFile reads from that path.
 // Each orchestrator instance (parent and child) gets its own tmp directory.
 
 let tmpRoot: string;
@@ -22,8 +22,8 @@ let tmpRoot: string;
 function makeTmpDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claw-e2e-'));
   // Create .claw structure
-  fs.mkdirSync(path.join(dir, '.claw', 'tmp'), { recursive: true });
-  fs.mkdirSync(path.join(dir, '.claw', 'runs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.dagclaw', 'tmp'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.dagclaw', 'runs'), { recursive: true });
   // Create a fake .git dir so isGitRepo returns true
   fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
   return dir;
@@ -261,7 +261,7 @@ describe('Recursive decomposition E2E', () => {
     });
 
     // Verify parent run dir exists
-    const parentDir = path.join(tmpRoot, '.claw', 'runs', parentRunId);
+    const parentDir = path.join(tmpRoot, '.dagclaw', 'runs', parentRunId);
     assert.ok(fs.existsSync(parentDir), 'parent run directory should exist');
 
     // Create child logger and init a child run
@@ -319,7 +319,7 @@ describe('Recursive decomposition E2E', () => {
 
     // Verify nested path: runs/<parent>/children/<child>/children/<grandchild>/
     const expectedPath = path.join(
-      tmpRoot, '.claw', 'runs', parentRunId,
+      tmpRoot, '.dagclaw', 'runs', parentRunId,
       'children', childRunId,
       'children', grandchildRunId,
       'manifest.json',

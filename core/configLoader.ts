@@ -1,5 +1,5 @@
 /**
- * Custom stage loading from claw.config.ts / claw.config.json.
+ * Custom stage loading from dagclaw.config.ts / dagclaw.config.json.
  * Discovers config files in project root, validates stage definitions,
  * and merges them with BUILTIN_STAGES.
  */
@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { StageDefinition, PipelineState } from './types.ts';
-import { ClawConfigSchema } from './types.ts';
+import { DagClawConfigSchema } from './types.ts';
 import { BUILTIN_STAGES } from './stageDefinitions.ts';
 
 // Reserved built-in stage names
@@ -103,16 +103,16 @@ function makeDefaultResultHandler(stageName: string): StageDefinition['resultHan
 }
 
 /**
- * Load custom stages from claw.config.ts or claw.config.json in projectDir.
- * - claw.config.ts takes priority (loaded via dynamic import)
- * - claw.config.json is fallback (validated with ClawConfigSchema)
+ * Load custom stages from dagclaw.config.ts or dagclaw.config.json in projectDir.
+ * - dagclaw.config.ts takes priority (loaded via dynamic import)
+ * - dagclaw.config.json is fallback (validated with DagClawConfigSchema)
  * Returns empty record if no config file found.
  */
 export async function loadCustomStages(
   projectDir: string,
 ): Promise<Record<string, StageDefinition>> {
-  const tsPath = join(projectDir, 'claw.config.ts');
-  const jsonPath = join(projectDir, 'claw.config.json');
+  const tsPath = join(projectDir, 'dagclaw.config.ts');
+  const jsonPath = join(projectDir, 'dagclaw.config.json');
 
   // Check for TS config first (higher priority)
   if (existsSync(tsPath)) {
@@ -139,7 +139,7 @@ async function loadFromTs(tsPath: string): Promise<Record<string, StageDefinitio
 
   if (!config || typeof config !== 'object' || !config.stages) {
     throw new Error(
-      `Invalid claw.config.ts: must export default { stages: { ... } }`,
+      `Invalid dagclaw.config.ts: must export default { stages: { ... } }`,
     );
   }
 
@@ -148,7 +148,7 @@ async function loadFromTs(tsPath: string): Promise<Record<string, StageDefinitio
     const validation = validateStageDefinition(value);
     if (!validation.valid) {
       throw new Error(
-        `Invalid stage "${key}" in claw.config.ts:\n  - ${validation.errors.join('\n  - ')}`,
+        `Invalid stage "${key}" in dagclaw.config.ts:\n  - ${validation.errors.join('\n  - ')}`,
       );
     }
     stages[key] = value as StageDefinition;
@@ -159,7 +159,7 @@ async function loadFromTs(tsPath: string): Promise<Record<string, StageDefinitio
 
 /**
  * Load stages from a JSON config file.
- * Validates with ClawConfigSchema, then converts to full StageDefinitions
+ * Validates with DagClawConfigSchema, then converts to full StageDefinitions
  * by providing default contextBuilder and resultHandler.
  */
 function loadFromJson(jsonPath: string): Record<string, StageDefinition> {
@@ -172,12 +172,12 @@ function loadFromJson(jsonPath: string): Record<string, StageDefinition> {
   }
 
   // Validate with Zod schema (validates name, runnerConfig, etc.)
-  const result = ClawConfigSchema.safeParse(parsed);
+  const result = DagClawConfigSchema.safeParse(parsed);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `${i.path.join('.')}: ${i.message}`)
       .join('\n  - ');
-    throw new Error(`Invalid claw.config.json:\n  - ${issues}`);
+    throw new Error(`Invalid dagclaw.config.json:\n  - ${issues}`);
   }
 
   const config = result.data;

@@ -1,5 +1,5 @@
 /**
- * Persistent run logging to .claw/runs/.
+ * Persistent run logging to .dagclaw/runs/.
  * Writes manifest incrementally on each subtask completion.
  */
 
@@ -60,7 +60,7 @@ export class RunLogger {
   }
 
   private clawDir(): string {
-    return path.join(this.workDir, '.claw');
+    return path.join(this.workDir, '.dagclaw');
   }
 
   private runsDir(): string {

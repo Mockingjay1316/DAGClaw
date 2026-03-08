@@ -1,5 +1,5 @@
 node_modules/
 dist/
-.claw/
+.dagclaw/
 *.log
 test/

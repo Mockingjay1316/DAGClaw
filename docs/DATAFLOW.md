@@ -1,4 +1,4 @@
-# Claw UI — Call Graph & Data Flow
+# DAGClaw — Call Graph & Data Flow
 
 ## High-Level Pipeline Flow
 
@@ -35,7 +35,7 @@
                   │                                        │
                   ▼                                        ▼
         ┌─────────────────┐                    ┌─────────────────────┐
-        │ claude -p (CLI) │                    │ .claw/              │
+        │ claude -p (CLI) │                    │ .dagclaw/              │
         │ subprocess      │                    │ ├── runs/<id>/      │
         └─────────────────┘                    │ ├── tmp/            │
                                                │ ├── memory/         │
@@ -75,13 +75,13 @@ TaskOrchestrator.run()
 │     │  │ gitInfo?: {branch, commitBefore, ...}         │
 │     │  └───────────────────────────────────────────────┘
 │     → returns runId: string
-│     → creates .claw/runs/<runId>/manifest.json
+│     → creates .dagclaw/runs/<runId>/manifest.json
 │
 ├─ 5. IF !isChild: acquireLock(workDir, runId)
-│     → creates .claw/lock {pid, runId, startedAt}
+│     → creates .dagclaw/lock {pid, runId, startedAt}
 │
 ├─ 6. memory.buildContextBlock()
-│     → reads .claw/memory/*.md
+│     → reads .dagclaw/memory/*.md
 │     → returns "--- Project Memory ---\n## file.md\n<content>\n..."
 │
 ├─ 7. Build PipelineState (mutable, flows through all stages)
@@ -130,8 +130,8 @@ Every Claude invocation flows through this method.
 runOne(runId, stage, state, subtask?)
 │
 ├─ 1. Compute output file path (run-scoped tmp)
-│     subtask? → ".claw/runs/<runId>/tmp/subtask-{N}-summary.json"
-│     stage    → ".claw/runs/<runId>/tmp/{stage}.json"
+│     subtask? → ".dagclaw/runs/<runId>/tmp/subtask-{N}-summary.json"
+│     stage    → ".dagclaw/runs/<runId>/tmp/{stage}.json"
 │
 ├─ 2. stage.contextBuilder(state, outputFile, subtask?)
 │     │
@@ -140,7 +140,7 @@ runOne(runId, stage, state, subtask?)
 │     │  │ workDir: "/path/to/project"                          │
 │     │  │ prompt: "Build a CLI tool..."                        │
 │     │  │ memoryContext: "--- Memory ---\n..."                 │
-│     │  │ outputFile: ".claw/runs/<id>/tmp/plan.json"          │
+│     │  │ outputFile: ".dagclaw/runs/<id>/tmp/plan.json"          │
 │     │  │ dagPaletteDescriptions: "- Execute: ... (tools: all)"│
 │     │  │ postStagesDescription: "- Verify"                    │
 │     │  └──────────────────────────────────────────────────────┘
@@ -154,7 +154,7 @@ runOne(runId, stage, state, subtask?)
 │     │  │   "[Subtask 0] Created Express app with routes"        │
 │     │  │   (built from subtask.dependencies → subtaskSnapshots) │
 │     │  │ memoryContext: "--- Memory ---\n..."                   │
-│     │  │ outputFile: ".claw/runs/<id>/tmp/subtask-0-summary.json" │
+│     │  │ outputFile: ".dagclaw/runs/<id>/tmp/subtask-0-summary.json" │
 │     │  └────────────────────────────────────────────────────────┘
 │     │
 │     │  Verify returns:
@@ -163,7 +163,7 @@ runOne(runId, stage, state, subtask?)
 │     │  │ planSummary: "Build 3-file project..."       │
 │     │  │ subtaskSummaries: "[Subtask 0] Created..."   │
 │     │  │ skippedIndices: "none" | "1, 2"              │
-│     │  │ outputFile: ".claw/runs/<id>/tmp/verify.json" │
+│     │  │ outputFile: ".dagclaw/runs/<id>/tmp/verify.json" │
 │     │  └──────────────────────────────────────────────┘
 │     │
 │     → returns Record<string, string>  (template variables)
@@ -173,7 +173,7 @@ runOne(runId, stage, state, subtask?)
 │     → returns assembled prompt string
 │
 ├─ 4. logger.logStagePrompt(runId, stageName, prompt, systemPrompt, subtaskIndex?)
-│     → writes .claw/runs/<id>/prompts/{stage}.md
+│     → writes .dagclaw/runs/<id>/prompts/{stage}.md
 │        (retry-numbered: verify-retry-1.md, execute-subtask-1-retry-1.md)
 │
 ├─ 5. runClaudeCli(RunClaudeOptions)
@@ -371,7 +371,7 @@ runRecursive(runId, stage, state, subtask)
 
 ## Structured Output Schemas (Zod)
 
-Agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`). The orchestrator's `runOne()` validates via each stage's declared `outputSchema` (Zod), then passes parsed data to `resultHandler`:
+Agents write JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`). The orchestrator's `runOne()` validates via each stage's declared `outputSchema` (Zod), then passes parsed data to `resultHandler`:
 
 ### Plan Output (`plan.json`)
 ```json
@@ -417,7 +417,7 @@ Agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`). The orches
 ## File System Layout
 
 ```
-.claw/
+.dagclaw/
 ├── lock                              ← acquireLock/releaseLock (root only)
 │   {pid: 12345, runId: "...", startedAt: "..."}
 │

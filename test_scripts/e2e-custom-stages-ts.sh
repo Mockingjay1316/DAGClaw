@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# E2E: Custom stages via claw.config.ts — TypeScript config with full StageDefinition
+# E2E: Custom stages via dagclaw.config.ts — TypeScript config with full StageDefinition
 # Tests that:
-#   1. claw.config.ts is loaded and takes priority over .json
+#   1. dagclaw.config.ts is loaded and takes priority over .json
 #   2. A TS-defined stage with custom contextBuilder/resultHandler works
 #   3. The custom stage appears in the pipeline
 #
@@ -19,8 +19,8 @@ rm -rf "$TEST_DIR"
 mkdir -p "$TEST_DIR"
 echo '{"type": "commonjs"}' > "$TEST_DIR/package.json"
 
-# Create a claw.config.ts with a custom "Review" stage
-cat > "$TEST_DIR/claw.config.ts" << 'TSEOF'
+# Create a dagclaw.config.ts with a custom "Review" stage
+cat > "$TEST_DIR/dagclaw.config.ts" << 'TSEOF'
 import type { StageDefinition, PipelineState, SubtaskDefinition } from '../core/types.ts';
 
 const ReviewStage: StageDefinition = {
@@ -63,11 +63,11 @@ export default {
 };
 TSEOF
 
-echo "=== E2E: Custom Stages (claw.config.ts) ==="
+echo "=== E2E: Custom Stages (dagclaw.config.ts) ==="
 echo "Working directory: $TEST_DIR"
 echo ""
-echo "--- claw.config.ts ---"
-cat "$TEST_DIR/claw.config.ts"
+echo "--- dagclaw.config.ts ---"
+cat "$TEST_DIR/dagclaw.config.ts"
 echo ""
 echo ""
 

@@ -1,9 +1,10 @@
 {
-  "name": "claw",
+  "name": "dagclaw",
   "version": "0.1.0",
-  "description": "Multi-stage recursive orchestration engine for Claude Code",
+  "description": "Multi-stage recursive orchestration engine with explicit DAG scheduling",
   "type": "module",
   "bin": {
+    "dagclaw": "./bin/dagclaw.js",
     "claw": "./bin/claw.js"
   },
   "scripts": {

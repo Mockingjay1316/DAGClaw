@@ -84,8 +84,8 @@ else
   echo "[FAIL] claw exited with code $CLAW_EXIT"
 fi
 
-# Check that .claw/runs/ has at least one run
-RUNS_DIR="$TEST_DIR/.claw/runs"
+# Check that .dagclaw/runs/ has at least one run
+RUNS_DIR="$TEST_DIR/.dagclaw/runs"
 if [ -d "$RUNS_DIR" ]; then
   RUN_COUNT=$(ls -1 "$RUNS_DIR" | wc -l)
   echo "[PASS] Found $RUN_COUNT run(s) in $RUNS_DIR"
@@ -104,7 +104,7 @@ if [ -d "$RUNS_DIR" ]; then
     echo "       (Check the plan output to see if any subtask had needsRecursiveDecomposition: true)"
   fi
 else
-  echo "[FAIL] No .claw/runs/ directory found"
+  echo "[FAIL] No .dagclaw/runs/ directory found"
 fi
 
 # Check git changes

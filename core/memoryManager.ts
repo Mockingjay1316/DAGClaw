@@ -1,5 +1,5 @@
 /**
- * Manages .claw/memory/ — distilled knowledge from run logs.
+ * Manages .dagclaw/memory/ — distilled knowledge from run logs.
  * Reads memory for context injection, writes memory after distillation.
  */
 
@@ -14,7 +14,7 @@ export class MemoryManager {
   }
 
   private memoryDir(): string {
-    return path.join(this.workDir, '.claw', 'memory');
+    return path.join(this.workDir, '.dagclaw', 'memory');
   }
 
   /** Read all markdown memory files, concatenated with headers. */

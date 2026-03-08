@@ -41,7 +41,7 @@ fi
 
 echo ""
 echo "=== Plan ==="
-[ -f "$TEST_DIR/.claw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
+[ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
 
 echo ""
 echo "=== Run History ==="

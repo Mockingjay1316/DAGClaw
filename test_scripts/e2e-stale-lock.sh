@@ -13,17 +13,17 @@ rm -rf "$TEST_DIR"
 mkdir -p "$TEST_DIR"
 echo '{"type": "commonjs"}' > "$TEST_DIR/package.json"
 
-# Pre-seed a stale lock at the real path (.claw/lock) with a non-existent PID
-mkdir -p "$TEST_DIR/.claw"
-cat > "$TEST_DIR/.claw/lock" << 'LOCK'
+# Pre-seed a stale lock at the real path (.dagclaw/lock) with a non-existent PID
+mkdir -p "$TEST_DIR/.dagclaw"
+cat > "$TEST_DIR/.dagclaw/lock" << 'LOCK'
 {"pid": 99999999, "runId": "stale-run-id", "startedAt": "2026-01-01T00:00:00.000Z"}
 LOCK
 
 echo "=== E2E: Stale Lock Cleanup ==="
 echo "Working directory: $TEST_DIR"
 echo ""
-echo "Pre-seeded stale lock (.claw/lock):"
-cat "$TEST_DIR/.claw/lock"
+echo "Pre-seeded stale lock (.dagclaw/lock):"
+cat "$TEST_DIR/.dagclaw/lock"
 echo ""
 echo "--- Starting claw ---"
 echo ""
@@ -45,7 +45,7 @@ grep -i "stale\|lock\|cleaned" "$SCRIPT_DIR/e2e-stale-lock.log" || echo "(no sta
 
 echo ""
 echo "=== Key check: lock file should be gone after run ==="
-[ -f "$TEST_DIR/.claw/lock" ] && echo "FAIL: lock file still exists" || echo "PASS: lock file cleaned up"
+[ -f "$TEST_DIR/.dagclaw/lock" ] && echo "FAIL: lock file still exists" || echo "PASS: lock file cleaned up"
 
 echo ""
 echo "=== Result ==="

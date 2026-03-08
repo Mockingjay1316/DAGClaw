@@ -22,8 +22,8 @@ describe('MemoryManager', () => {
       assert.equal(mm.readAll(), '');
     });
 
-    it('reads all markdown files from .claw/memory/', () => {
-      const memDir = path.join(tmpDir, '.claw', 'memory');
+    it('reads all markdown files from .dagclaw/memory/', () => {
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(path.join(memDir, 'codebase.md'), '# Codebase\nUses Express.');
       fs.writeFileSync(path.join(memDir, 'patterns.md'), '# Patterns\nUse async/await.');
@@ -35,7 +35,7 @@ describe('MemoryManager', () => {
     });
 
     it('ignores non-markdown files', () => {
-      const memDir = path.join(tmpDir, '.claw', 'memory');
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(path.join(memDir, 'notes.md'), '# Notes');
       fs.writeFileSync(path.join(memDir, 'data.json'), '{}');
@@ -49,7 +49,7 @@ describe('MemoryManager', () => {
 
   describe('readFile', () => {
     it('reads a specific memory file', () => {
-      const memDir = path.join(tmpDir, '.claw', 'memory');
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(path.join(memDir, 'errors.md'), '# Errors\nFix timeout.');
 
@@ -69,7 +69,7 @@ describe('MemoryManager', () => {
       const mm = new MemoryManager(tmpDir);
       mm.writeFile('codebase.md', '# Codebase\nNew info.');
 
-      const filePath = path.join(tmpDir, '.claw', 'memory', 'codebase.md');
+      const filePath = path.join(tmpDir, '.dagclaw', 'memory', 'codebase.md');
       assert.ok(fs.existsSync(filePath));
       assert.equal(fs.readFileSync(filePath, 'utf-8'), '# Codebase\nNew info.');
     });
@@ -90,7 +90,7 @@ describe('MemoryManager', () => {
     });
 
     it('returns markdown filenames', () => {
-      const memDir = path.join(tmpDir, '.claw', 'memory');
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(path.join(memDir, 'a.md'), 'a');
       fs.writeFileSync(path.join(memDir, 'b.md'), 'b');
@@ -108,7 +108,7 @@ describe('MemoryManager', () => {
     });
 
     it('wraps content in section markers', () => {
-      const memDir = path.join(tmpDir, '.claw', 'memory');
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(path.join(memDir, 'test.md'), 'content here');
 
@@ -119,7 +119,7 @@ describe('MemoryManager', () => {
     });
 
     it('respects maxChars budget', () => {
-      const memDir = path.join(tmpDir, '.claw', 'memory');
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(path.join(memDir, 'big.md'), 'x'.repeat(1000));
 

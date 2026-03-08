@@ -54,7 +54,7 @@ app.get('/api/health', (_req, res) => {
 const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
-  console.log(`Claw UI backend listening on port ${PORT}`);
+  console.log(`DAGClaw backend listening on port ${PORT}`);
 });
 
 function gracefulShutdown() {

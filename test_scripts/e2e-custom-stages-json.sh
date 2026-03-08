@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# E2E: Custom stages via claw.config.json — adds a "Lint" stage to the pipeline
+# E2E: Custom stages via dagclaw.config.json — adds a "Lint" stage to the pipeline
 # Tests that:
-#   1. claw.config.json is loaded and custom stages are merged with built-ins
+#   1. dagclaw.config.json is loaded and custom stages are merged with built-ins
 #   2. A custom stage can be included in --pipeline
 #   3. The custom stage runs and produces output
 #
@@ -19,8 +19,8 @@ rm -rf "$TEST_DIR"
 mkdir -p "$TEST_DIR"
 echo '{"type": "commonjs"}' > "$TEST_DIR/package.json"
 
-# Create a claw.config.json with a custom "Lint" stage
-cat > "$TEST_DIR/claw.config.json" << 'CONFIGEOF'
+# Create a dagclaw.config.json with a custom "Lint" stage
+cat > "$TEST_DIR/dagclaw.config.json" << 'CONFIGEOF'
 {
   "stages": {
     "Lint": {
@@ -37,11 +37,11 @@ cat > "$TEST_DIR/claw.config.json" << 'CONFIGEOF'
 }
 CONFIGEOF
 
-echo "=== E2E: Custom Stages (claw.config.json) ==="
+echo "=== E2E: Custom Stages (dagclaw.config.json) ==="
 echo "Working directory: $TEST_DIR"
 echo ""
-echo "--- claw.config.json ---"
-cat "$TEST_DIR/claw.config.json"
+echo "--- dagclaw.config.json ---"
+cat "$TEST_DIR/dagclaw.config.json"
 echo ""
 echo ""
 
@@ -99,7 +99,7 @@ fi
 
 echo ""
 echo "=== Plan ==="
-[ -f "$TEST_DIR/.claw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
+[ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
 
 echo ""
 echo "=== Run History ==="

@@ -81,7 +81,7 @@ grep -E 'Duration: [0-9]+m [0-9]+s|Duration: [0-9]+s' "$LOG_FILE" || echo "FAIL:
 
 echo ""
 echo "=== Manifest (raw) ==="
-MANIFEST=$(find "$TEST_DIR/.claw/runs" -name manifest.json -type f | head -1)
+MANIFEST=$(find "$TEST_DIR/.dagclaw/runs" -name manifest.json -type f | head -1)
 if [ -n "$MANIFEST" ]; then
   python3 -c "
 import json, sys

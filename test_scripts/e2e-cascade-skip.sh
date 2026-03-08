@@ -46,11 +46,11 @@ chmod 755 "$TEST_DIR/locked" 2>/dev/null
 
 echo ""
 echo "=== Plan ==="
-[ -f "$TEST_DIR/.claw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
+[ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
 
 echo ""
 echo "=== Verification ==="
-[ -f "$TEST_DIR/.claw/tmp/verify.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/verify.json" 2>/dev/null || echo "(no verification)"
+[ -f "$TEST_DIR/.dagclaw/tmp/verify.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/verify.json" 2>/dev/null || echo "(no verification)"
 
 echo ""
 echo "=== Key check: subtasks 1 and 2 should be skipped ==="

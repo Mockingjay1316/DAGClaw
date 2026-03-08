@@ -33,7 +33,7 @@ grep -iE "skip|no subtask|0 subtask" "$SCRIPT_DIR/e2e-empty-task.log" || echo "(
 
 echo ""
 echo "=== Plan ==="
-[ -f "$TEST_DIR/.claw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
+[ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
 
 echo ""
 echo "=== Files created (should be none) ==="

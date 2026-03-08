@@ -33,10 +33,10 @@ echo "=== Run complete (exit code: $EXIT_CODE) ==="
 # Show plan decomposition
 echo ""
 echo "=== Plan (subtask decomposition) ==="
-if [ -f "$TEST_DIR/.claw/tmp/plan.json" ]; then
+if [ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ]; then
   python3 -c "
 import json, sys
-p = json.load(open('$TEST_DIR/.claw/tmp/plan.json'))
+p = json.load(open('$TEST_DIR/.dagclaw/tmp/plan.json'))
 print(f\"Summary: {p['summary']}\")
 print(f\"Subtasks: {len(p['subtasks'])}\")
 for s in p['subtasks']:
@@ -44,7 +44,7 @@ for s in p['subtasks']:
     print(f\"  [{s['index']}] {s['description']} [{s['estimatedComplexity']}]{deps}\")
 if p.get('qualityFlag'):
     print(f\"Quality flag: {p['qualityFlag']}\")
-" 2>/dev/null || cat "$TEST_DIR/.claw/tmp/plan.json"
+" 2>/dev/null || cat "$TEST_DIR/.dagclaw/tmp/plan.json"
 else
   echo "(no plan)"
 fi
@@ -67,12 +67,12 @@ if [ -n "$ENTRY" ]; then
   node "$ENTRY" 100 X 2>&1 && echo "" || echo "(error as expected)"
 else
   echo "No .js files found — checking all generated files:"
-  find "$TEST_DIR" -maxdepth 2 -type f ! -path '*/.claw/*' ! -name 'package.json'
+  find "$TEST_DIR" -maxdepth 2 -type f ! -path '*/.dagclaw/*' ! -name 'package.json'
 fi
 
 echo ""
 echo "=== Verification ==="
-[ -f "$TEST_DIR/.claw/tmp/verify.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/verify.json" 2>/dev/null || echo "(no verification)"
+[ -f "$TEST_DIR/.dagclaw/tmp/verify.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/verify.json" 2>/dev/null || echo "(no verification)"
 
 echo ""
 echo "=== Run History ==="

@@ -79,9 +79,9 @@ describe('configLoader', () => {
   });
 
   // ---------------------------------------------------------------
-  // 2. loadCustomStages loads stages from claw.config.json
+  // 2. loadCustomStages loads stages from dagclaw.config.json
   // ---------------------------------------------------------------
-  describe('loadCustomStages – claw.config.json', () => {
+  describe('loadCustomStages – dagclaw.config.json', () => {
     it('loads and returns stages from a valid JSON config', async () => {
       const dir = makeTmpDir();
       try {
@@ -91,7 +91,7 @@ describe('configLoader', () => {
           },
         };
         writeFileSync(
-          join(dir, 'claw.config.json'),
+          join(dir, 'dagclaw.config.json'),
           JSON.stringify(config, null, 2),
         );
 
@@ -128,7 +128,7 @@ describe('configLoader', () => {
           },
         };
         writeFileSync(
-          join(dir, 'claw.config.json'),
+          join(dir, 'dagclaw.config.json'),
           JSON.stringify(config, null, 2),
         );
 
@@ -144,9 +144,9 @@ describe('configLoader', () => {
   });
 
   // ---------------------------------------------------------------
-  // 3. loadCustomStages loads stages from claw.config.ts
+  // 3. loadCustomStages loads stages from dagclaw.config.ts
   // ---------------------------------------------------------------
-  describe('loadCustomStages – claw.config.ts', () => {
+  describe('loadCustomStages – dagclaw.config.ts', () => {
     it('loads stages from a TypeScript config via dynamic import', async () => {
       const dir = makeTmpDir();
       try {
@@ -166,7 +166,7 @@ export default {
   },
 };
 `;
-        writeFileSync(join(dir, 'claw.config.ts'), tsContent);
+        writeFileSync(join(dir, 'dagclaw.config.ts'), tsContent);
 
         const stages = await loadCustomStages(dir);
 
@@ -184,7 +184,7 @@ export default {
       }
     });
 
-    it('prefers claw.config.ts over claw.config.json when both exist', async () => {
+    it('prefers dagclaw.config.ts over dagclaw.config.json when both exist', async () => {
       const dir = makeTmpDir();
       try {
         // Write JSON config
@@ -194,7 +194,7 @@ export default {
           },
         };
         writeFileSync(
-          join(dir, 'claw.config.json'),
+          join(dir, 'dagclaw.config.json'),
           JSON.stringify(jsonConfig, null, 2),
         );
 
@@ -214,7 +214,7 @@ export default {
   },
 };
 `;
-        writeFileSync(join(dir, 'claw.config.ts'), tsContent);
+        writeFileSync(join(dir, 'dagclaw.config.ts'), tsContent);
 
         const stages = await loadCustomStages(dir);
 
@@ -248,7 +248,7 @@ export default {
           },
         };
         writeFileSync(
-          join(dir, 'claw.config.json'),
+          join(dir, 'dagclaw.config.json'),
           JSON.stringify(config, null, 2),
         );
 
@@ -281,7 +281,7 @@ export default {
           },
         };
         writeFileSync(
-          join(dir, 'claw.config.json'),
+          join(dir, 'dagclaw.config.json'),
           JSON.stringify(config, null, 2),
         );
 
@@ -317,7 +317,7 @@ export default {
           },
         };
         writeFileSync(
-          join(dir, 'claw.config.json'),
+          join(dir, 'dagclaw.config.json'),
           JSON.stringify(config, null, 2),
         );
 

@@ -25,10 +25,10 @@ describe('taskManager', () => {
   });
 
   describe('acquireLock', () => {
-    it('creates .claw/lock file with PID', () => {
+    it('creates .dagclaw/lock file with PID', () => {
       acquireLock(tmpDir, 'run-123');
 
-      const lockPath = path.join(tmpDir, '.claw', 'lock');
+      const lockPath = path.join(tmpDir, '.dagclaw', 'lock');
       assert.ok(fs.existsSync(lockPath));
       const content = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
       assert.equal(content.pid, process.pid);
@@ -46,7 +46,7 @@ describe('taskManager', () => {
       acquireLock(tmpDir, 'run-1');
       releaseLock(tmpDir);
 
-      const lockPath = path.join(tmpDir, '.claw', 'lock');
+      const lockPath = path.join(tmpDir, '.dagclaw', 'lock');
       assert.ok(!fs.existsSync(lockPath));
     });
 
@@ -71,8 +71,8 @@ describe('taskManager', () => {
 
     it('detects and cleans stale lock (dead PID)', () => {
       // Write a lock with a PID that doesn't exist
-      const lockPath = path.join(tmpDir, '.claw', 'lock');
-      fs.mkdirSync(path.join(tmpDir, '.claw'), { recursive: true });
+      const lockPath = path.join(tmpDir, '.dagclaw', 'lock');
+      fs.mkdirSync(path.join(tmpDir, '.dagclaw'), { recursive: true });
       fs.writeFileSync(
         lockPath,
         JSON.stringify({ pid: 999999999, runId: 'stale-run', startedAt: new Date().toISOString() })

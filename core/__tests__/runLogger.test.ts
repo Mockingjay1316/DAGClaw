@@ -29,7 +29,7 @@ describe('RunLogger', () => {
   });
 
   describe('initRun', () => {
-    it('creates .claw/runs/<runId>/ directory', () => {
+    it('creates .dagclaw/runs/<runId>/ directory', () => {
       const logger = new RunLogger(tmpDir);
       const runId = logger.initRun({
         prompt: 'test task',
@@ -39,7 +39,7 @@ describe('RunLogger', () => {
       });
 
       assert.ok(runId.length > 0);
-      const runDir = path.join(tmpDir, '.claw', 'runs', runId);
+      const runDir = path.join(tmpDir, '.dagclaw', 'runs', runId);
       assert.ok(fs.existsSync(runDir));
     });
 
@@ -108,7 +108,7 @@ describe('RunLogger', () => {
       logger.writePlan(runId, plan);
 
       const planPath = path.join(
-        tmpDir, '.claw', 'runs', runId, 'plan.json'
+        tmpDir, '.dagclaw', 'runs', runId, 'plan.json'
       );
       assert.ok(fs.existsSync(planPath));
       const written = JSON.parse(fs.readFileSync(planPath, 'utf-8'));
@@ -130,7 +130,7 @@ describe('RunLogger', () => {
       logger.appendSubtaskLog(runId, 0, 'line 2\n');
 
       const logPath = path.join(
-        tmpDir, '.claw', 'runs', runId, 'subtasks', '0.log'
+        tmpDir, '.dagclaw', 'runs', runId, 'subtasks', '0.log'
       );
       assert.ok(fs.existsSync(logPath));
       const content = fs.readFileSync(logPath, 'utf-8');
@@ -195,7 +195,7 @@ describe('RunLogger', () => {
       logger.writeVerification(runId, result);
 
       const verifyPath = path.join(
-        tmpDir, '.claw', 'runs', runId, 'verification.json'
+        tmpDir, '.dagclaw', 'runs', runId, 'verification.json'
       );
       assert.ok(fs.existsSync(verifyPath));
     });
@@ -230,9 +230,9 @@ describe('RunLogger', () => {
   });
 
   describe('cleanTmp', () => {
-    it('falls back to .claw/tmp/ when no run initialized', () => {
+    it('falls back to .dagclaw/tmp/ when no run initialized', () => {
       const logger = new RunLogger(tmpDir);
-      const tmpClaw = path.join(tmpDir, '.claw', 'tmp');
+      const tmpClaw = path.join(tmpDir, '.dagclaw', 'tmp');
       fs.mkdirSync(tmpClaw, { recursive: true });
       fs.writeFileSync(path.join(tmpClaw, 'plan.json'), '{}');
 
@@ -253,7 +253,7 @@ describe('RunLogger', () => {
 
       logger.cleanTmp();
 
-      const runTmp = path.join(tmpDir, '.claw', 'runs', runId, 'tmp');
+      const runTmp = path.join(tmpDir, '.dagclaw', 'runs', runId, 'tmp');
       assert.ok(fs.existsSync(runTmp), 'run-scoped tmp dir should exist');
     });
 
@@ -267,7 +267,7 @@ describe('RunLogger', () => {
       });
 
       const outputPath = logger.tmpPath('plan.json');
-      const expected = path.join(tmpDir, '.claw', 'runs', runId, 'tmp', 'plan.json');
+      const expected = path.join(tmpDir, '.dagclaw', 'runs', runId, 'tmp', 'plan.json');
       assert.equal(outputPath, expected);
     });
 

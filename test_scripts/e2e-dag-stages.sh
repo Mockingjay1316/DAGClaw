@@ -3,7 +3,7 @@
 # Tests that:
 #   1. --dag-stages advertises available stages to the planner
 #   2. Subtasks can be routed to different stage definitions
-#   3. Custom stage definitions (from claw.config.json) work in DAG
+#   3. Custom stage definitions (from dagclaw.config.json) work in DAG
 #   4. Stage descriptions appear in plan prompt
 #
 # Sets up a project with an Execute stage and a custom "Check" stage.
@@ -32,8 +32,8 @@ function double(x) {
 module.exports = { double };
 JSEOF
 
-# Create a claw.config.json with a "Check" stage for read-only review
-cat > "$TEST_DIR/claw.config.json" << 'CONFIGEOF'
+# Create a dagclaw.config.json with a "Check" stage for read-only review
+cat > "$TEST_DIR/dagclaw.config.json" << 'CONFIGEOF'
 {
   "stages": {
     "Check": {
@@ -52,8 +52,8 @@ CONFIGEOF
 echo "=== E2E: DAG Stages (per-subtask routing) ==="
 echo "Working directory: $TEST_DIR"
 echo ""
-echo "--- claw.config.json ---"
-cat "$TEST_DIR/claw.config.json"
+echo "--- dagclaw.config.json ---"
+cat "$TEST_DIR/dagclaw.config.json"
 echo ""
 echo "--- existing.js (pre-created with bug) ---"
 cat "$TEST_DIR/existing.js"
@@ -84,7 +84,7 @@ echo ""
 
 # Check that the planner received dag stage descriptions
 echo "--- DAG palette in plan prompt ---"
-PROMPT_DIR=$(find "$TEST_DIR/.claw/runs" -name "prompts" -type d | head -1)
+PROMPT_DIR=$(find "$TEST_DIR/.dagclaw/runs" -name "prompts" -type d | head -1)
 if [ -n "$PROMPT_DIR" ] && [ -d "$PROMPT_DIR" ]; then
   echo "Checking plan prompt for stage descriptions..."
   grep -l 'Check\|Execute' "$PROMPT_DIR"/plan*.md 2>/dev/null | head -1 | xargs grep -c 'Check' 2>/dev/null | xargs -I{} echo "  'Check' mentioned {} times in plan prompt"
@@ -95,10 +95,10 @@ fi
 # Check plan for stage assignments
 echo ""
 echo "--- Plan stage assignments ---"
-if [ -f "$TEST_DIR/.claw/tmp/plan.json" ]; then
+if [ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ]; then
   python3 -c "
 import json
-plan = json.load(open('$TEST_DIR/.claw/tmp/plan.json'))
+plan = json.load(open('$TEST_DIR/.dagclaw/tmp/plan.json'))
 for s in plan.get('subtasks', []):
     stage = s.get('stage', 'Execute')
     print(f'  Subtask {s[\"index\"]}: stage={stage}, desc=\"{s[\"description\"]}\"')
@@ -136,7 +136,7 @@ fi
 
 echo ""
 echo "=== Plan ==="
-[ -f "$TEST_DIR/.claw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.claw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
+[ -f "$TEST_DIR/.dagclaw/tmp/plan.json" ] && python3 -m json.tool "$TEST_DIR/.dagclaw/tmp/plan.json" 2>/dev/null || echo "(no plan)"
 
 echo ""
 echo "=== Run History ==="

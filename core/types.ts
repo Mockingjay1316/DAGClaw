@@ -96,30 +96,30 @@ export const ExecutorOutputSchema = z.object({
 
 export type ExecutorOutput = z.infer<typeof ExecutorOutputSchema>;
 
-// --- Custom Stage Config (claw.config.json) ---
+// --- Custom Stage Config (dagclaw.config.json) ---
 
-export const ClawConfigStageRunnerSchema = z.object({
+export const DagClawConfigStageRunnerSchema = z.object({
   systemPrompt: z.string(),
   promptTemplate: z.string(),
   allowedTools: z.array(z.string()).optional(),
 });
 
-export const ClawConfigStageSchema = z.object({
+export const DagClawConfigStageSchema = z.object({
   name: z.string(),
-  runnerConfig: ClawConfigStageRunnerSchema,
+  runnerConfig: DagClawConfigStageRunnerSchema,
   approvalRequired: z.boolean().optional(),
   parallel: z.boolean().optional(),
   maxRetries: z.number().optional(),
   retryStage: z.string().optional(),
 });
 
-export const ClawConfigSchema = z.object({
-  stages: z.record(z.string(), ClawConfigStageSchema),
+export const DagClawConfigSchema = z.object({
+  stages: z.record(z.string(), DagClawConfigStageSchema),
 });
 
-export type ClawConfigStageRunner = z.infer<typeof ClawConfigStageRunnerSchema>;
-export type ClawConfigStage = z.infer<typeof ClawConfigStageSchema>;
-export type ClawConfig = z.infer<typeof ClawConfigSchema>;
+export type DagClawConfigStageRunner = z.infer<typeof DagClawConfigStageRunnerSchema>;
+export type DagClawConfigStage = z.infer<typeof DagClawConfigStageSchema>;
+export type DagClawConfig = z.infer<typeof DagClawConfigSchema>;
 
 // --- Stage ---
 

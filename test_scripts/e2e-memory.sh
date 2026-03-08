@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E2E: Memory injection — pre-seed .claw/memory/, verify plan references it
+# E2E: Memory injection — pre-seed .dagclaw/memory/, verify plan references it
 # Usage: cd /home/mockingjay/research/claw_ui && bash test/e2e-memory.sh
 
 set -uo pipefail
@@ -14,8 +14,8 @@ mkdir -p "$TEST_DIR"
 echo '{"type": "commonjs"}' > "$TEST_DIR/package.json"
 
 # Pre-seed memory with project conventions
-mkdir -p "$TEST_DIR/.claw/memory"
-cat > "$TEST_DIR/.claw/memory/conventions.md" << 'MEMORY'
+mkdir -p "$TEST_DIR/.dagclaw/memory"
+cat > "$TEST_DIR/.dagclaw/memory/conventions.md" << 'MEMORY'
 # Project Conventions
 
 - All functions must include a JSDoc comment with @param and @return tags
@@ -24,7 +24,7 @@ cat > "$TEST_DIR/.claw/memory/conventions.md" << 'MEMORY'
 - Every file must start with a "use strict" directive
 MEMORY
 
-cat > "$TEST_DIR/.claw/memory/patterns.md" << 'MEMORY'
+cat > "$TEST_DIR/.dagclaw/memory/patterns.md" << 'MEMORY'
 # Patterns
 
 - Error handling: always validate input types and throw TypeError for invalid args
@@ -37,10 +37,10 @@ echo "Working directory: $TEST_DIR"
 echo ""
 echo "Pre-seeded memory:"
 echo "--- conventions.md ---"
-cat "$TEST_DIR/.claw/memory/conventions.md"
+cat "$TEST_DIR/.dagclaw/memory/conventions.md"
 echo ""
 echo "--- patterns.md ---"
-cat "$TEST_DIR/.claw/memory/patterns.md"
+cat "$TEST_DIR/.dagclaw/memory/patterns.md"
 echo ""
 echo "--- Starting claw ---"
 echo ""
