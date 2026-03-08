@@ -452,260 +452,42 @@ claw_ui/
 - xterm.js itself is the buffer for terminal content
 - Ring buffer replay on subscribe handles late-joining
 
-## Implementation Order — Bootstrapping Strategy
+## Current Status (v0.1.0)
 
-The key insight: **Phase 0 builds the orchestrator as a CLI tool, then Phases 1+ use that tool to build itself.**
+DAGClaw v0.1.0 is a working multi-stage recursive orchestration engine with CLI, backend server, and web frontend. Phase 0 was hand-written (~10 core files). Phases 1–5 were built by DAGClaw using itself as the orchestrator — recursive decomposition, custom stages, backend server, React frontend, and integration polish were all self-built tasks.
 
-Phase 0 is hand-written (~7 files, minimal). Once it works, we feed it prompts like:
-```bash
-npx claw "Build the Express + WebSocket backend server for DAGClaw per PLAN.md"
-```
-and it Plans → Executes → Verifies autonomously.
+### Component Inventory
 
----
+| Component | Location | Lines | Tests | Description |
+|-----------|----------|------:|------:|-------------|
+| Core engine | `core/` | ~8,300 | 206 | Orchestrator, Claude runner, DAG scheduler, stage definitions, config loader, run logger, memory, prompt builder |
+| CLI | `cli/` | ~1,800 | — | Entry point, arg parsing, live DAG display, stage ticker |
+| Backend | `backend/src/` | ~950 | 60 | Express + WebSocket server, REST API, auth, rate limiting |
+| Frontend | `frontend/src/` | ~1,700 | — | React + Vite + xterm.js + Zustand, task tree, plan/execution/verify views |
+| **Total** | | **~12,750** | **266** | |
 
-### Phase 0: Bootstrap CLI (built by Claude Code directly) — ✅ COMPLETE
+### Current Capabilities
 
-**Status**: All 10 source files implemented. 125 tests passing. TypeScript type-checks clean. CLI entry point functional.
+- Configurable pipelines (`--pipeline Plan,Execute,Verify`) with per-subtask stage routing (`--dag-stages`)
+- Parallel DAG execution with greedy dependency resolution, cascade-skip on failure
+- Recursive decomposition — subtasks spawn child orchestrators with their own pipelines
+- Custom stages via `dagclaw.config.json` / `dagclaw.config.ts` (domain-agnostic)
+- Persistent run logs (`.dagclaw/runs/`) with full prompt capture and cost tracking
+- Project memory injection from `.dagclaw/memory/`
+- Live TTY DAG display with elapsed tickers, tree-format cost summary
+- Express + WebSocket backend with auth, rate limiting, path traversal prevention
+- React frontend with task tree, plan approval, xterm.js terminals, real-time WebSocket updates
+- E2E test scripts covering core flows (`test_scripts/`)
 
-**Files (all under `src/`):**
+### Known Limitations
 
-```
-claw_ui/
-├── src/
-│   ├── cli.ts                    ✅ CLI entry: arg parsing, plan approval, run history
-│   ├── types.ts                  ✅ All interfaces, Zod schemas, enums
-│   ├── claudeRunner.ts           ✅ CLI spawning, output parsing, usage tracking, cost estimation
-│   ├── promptBuilder.ts          ✅ Template interpolation, snapshot formatting, cache-optimized ordering
-│   ├── stageDefinitions.ts       ✅ Plan/Execute/Verify configs with contextBuilder, resultHandler
-│   ├── dependencyResolver.ts     ✅ DAG topological sort, cycle detection, cascade skipping
-│   ├── taskOrchestrator.ts       ✅ Pipeline driver, runOne(), runDAG(), plan approval
-│   ├── taskManager.ts            ✅ Lockfile management, task node factory
-│   ├── runLogger.ts              ✅ Manifest persistence, usage tracking, run history
-│   └── memoryManager.ts          ✅ Memory reading/writing, context injection
-├── bin/claw.js                   ✅ Entry point (tsx loader)
-├── package.json                  ✅ deps: tsx, zod
-├── tsconfig.json                 ✅
-├── PLAN.md
-├── CLAUDE.md
-└── README.md
-```
-
-**CLI interface:**
-```bash
-# Basic usage — runs Plan → Execute → Verify
-# Default: interactive mode (Claude Code asks before each tool execution)
-npx claw "Add error handling to the auth module"
-
-# Custom pipeline
-npx claw --pipeline "Plan,Execute,Test,Verify" "Refactor the database layer"
-
-# Permission modes
-npx claw "fix the bug"                          # interactive (default) — asks before every tool use
-npx claw --yolo "fix the bug"                   # fully automatic — no permission prompts at all
-npx claw --auto-execute "fix the bug"           # plan stage is interactive, execution is automatic
-
-# Backend selection
-npx claw "fix the bug"                          # default: Agent SDK
-npx claw --backend cli "fix the bug"            # CLI fallback: claude -p (uses Claude Code's own auth)
-npx claw --backend "codex" "fix the bug"        # custom tool: any CLI that accepts prompts
-
-# Other options
-npx claw \
-  --workdir ./my-project \
-  --pipeline "Plan,Execute,Verify" \
-  --auto-approve \               # skip plan approval (default: prompt in terminal)
-  --max-retries 3 \
-  --max-concurrency 5 \
-  --max-depth 3 \
-  "Build the REST API per PLAN.md"
-```
-
-**Permission modes explained:**
-- `interactive` (default): Claude Code's built-in permission system is fully active. Each Claude Code instance will ask the user before running Bash commands, editing files, etc. This is the safest mode — you see and approve every action.
-- `--yolo` / `--auto`: Passes `--dangerously-skip-permissions` to Claude Code instances. Fully autonomous — no user prompts. Use for trusted, well-tested workflows.
-- `--auto-execute`: Hybrid — the Plan stage runs in interactive mode (you review the plan and approve tool uses), but once you approve the plan, Execute and Verify stages run autonomously. Good middle ground for when you trust the plan but want to review it first.
-
-**CLI output** — live terminal display with TTY in-place updates (non-TTY: sequential log lines):
-```
-[Plan] Running... (0s)               ← live elapsed ticker, overwrites in-place
-[Plan] Running... (3s)
-                                      ← ticker cleared when Plan completes
-[Plan] Generated plan: 3 subtask(s) — Set up Express routes | Implement WebSocket | Wire up task manager
-  ├── [0] Set up Express routes (low)
-  ├── [1] Implement WebSocket server (medium, depends on 0)
-  └── [2] Wire up task manager (low, depends on 0)
-[Plan] Approve this plan? (y/n/edit): y
-
-                                      ← Live DAG display (mutable zone):
-[Execute] [0] Set up Express routes -- running... (5s)
-[Execute] [1] Implement WebSocket -- running... (3s)
-  Waiting: [2] blocked on [0, 1]
-                                      ← Running lines overwrite in-place every 500ms
-                                      ← When [0] completes, its line locks permanently above:
-
-[Execute] [0] Set up Express routes -- done (12s)
-[Execute] [1] Implement WebSocket -- running... (8s)
-[Execute] [2] Wire up task manager -- running... (5s)
-
-[Execute] [0] Set up Express routes -- done (12s)
-[Execute] [1] Implement WebSocket -- done (15s)
-[Execute] [2] Wire up task manager -- done (10s)
-
-[Verify] Running... (0s)             ← stage ticker for Verify
-[Verify] All checks passed.
-
-✓ Task completed successfully.
-
-[Cost] Total: ~$0.42 | Tokens: 18.2k in / 12.1k out | Duration: 3m 24s
-  |-- [Plan]    $0.08  (4.1k in / 2.3k out)
-  |-- [Execute] $0.28  (10.5k in / 8.1k out)  <- 3 subtasks
-  +-- [Verify]  $0.06  (3.6k in / 1.7k out)
-```
-
-**Live DAG display** (`src/dagDisplay.ts`): Renders DAG execution progress. TTY mode uses ANSI cursor-up/clear-line codes to overwrite running lines in-place while completed lines stay permanently above. Non-TTY mode prints sequential log lines. A 500ms timer ticks elapsed time on running tasks. `DagDisplay.writeStatus()` coordinates all stdout writes during active display to prevent interleaved output from breaking cursor math. Standalone stages (Plan, Verify) get their own elapsed ticker via `stageStart()`/`stageEnd()`.
-
-**Plan approval in CLI**: When `--auto-approve` is not set, the CLI prints the plan and prompts `Approve? (y/n/edit)`. On `n`, it aborts. On `edit`, it opens the plan JSON in `$EDITOR` and re-reads it. On `y`, it continues.
-
-**What's intentionally deferred:**
-- No web UI, REST, or WebSocket
-- No ring buffers or subscription management
-
----
-
-### End-to-end validation (continuous)
-
-End-to-end evaluation is continuous — we always need it, but we cannot exhaust all cases. E2E test scripts live in `test_scripts/` and cover scenarios like hello-world, concurrency, cascade skip, memory, retry, recursive decomposition, custom stages, live DAG display, and cost summary. Each new feature should add or update an e2e script. Run them manually to validate real Claude CLI behavior:
-
-```bash
-bash test_scripts/e2e-hello.sh             # basic single-subtask pipeline
-bash test_scripts/e2e-recursive.sh         # recursive decomposition with child orchestrators
-bash test_scripts/e2e-cost-summary.sh      # tree-format cost summary
-bash test_scripts/e2e-dag-display.sh       # live DAG status display
-bash test_scripts/e2e-custom-stages-json.sh # custom stage via dagclaw.config.json
-bash test_scripts/e2e-custom-stages-ts.sh   # custom stage via dagclaw.config.ts
-bash test_scripts/e2e-dag-stages.sh        # per-subtask stage routing
-```
-
----
-
-### Phase 1: Use `claw` to build itself — Recursive Decomposition
-
-Now feed `claw` its first real task — adding recursive decomposition to itself:
-```bash
-npx claw --workdir . --auto-approve \
-  "Add recursive decomposition support to the task orchestrator.
-   When a subtask has needsRecursiveDecomposition: true, create a child
-   TaskNode with its own Plan/Execute/Verify pipeline and a child
-   TaskOrchestrator. Update taskManager.ts to track parent/child
-   relationships. Refer to PLAN.md for the full design."
-```
-
----
-
-### Phase 2: Use `claw` to build — Custom Stage Support
-
-```bash
-npx claw --workdir . \
-  "Add custom stage definition support. Users should be able to define
-   custom StageDefinitions in a dagclaw.config.json file in their project
-   root. The CLI should load these and make them available in --pipeline.
-   Refer to PLAN.md section 'Stage Definitions' for the StageDefinition
-   interface."
-```
-
----
-
-### Phase 3: Use `claw` to build — Backend Server
-
-```bash
-npx claw --workdir . \
-  "Build the Express + WebSocket backend server for DAGClaw.
-   Move the core engine (claudeRunner, taskOrchestrator, etc.) into
-   a shared core/ directory. Create backend/ with Express server,
-   REST routes for tasks and stages, and WebSocket server with
-   subscription management and message buffering.
-   The CLI and backend should share the same core engine.
-   Refer to PLAN.md for full REST API spec and WebSocket protocol."
-```
-
-Expected project structure after this phase:
-```
-claw_ui/
-├── core/                         # Shared orchestration engine
-│   ├── types.ts
-│   ├── claudeRunner.ts
-│   ├── stageDefinitions.ts
-│   ├── dependencyResolver.ts
-│   ├── taskOrchestrator.ts
-│   └── taskManager.ts
-├── cli/                          # CLI entry point (uses core/)
-│   └── cli.ts
-├── backend/                      # Express server (uses core/)
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── routes/
-│   │   │   ├── tasks.ts
-│   │   │   └── stages.ts
-│   │   └── websocket/
-│   │       ├── wsServer.ts
-│   │       ├── subscriptionManager.ts
-│   │       └── messageBuffer.ts
-│   └── package.json
-├── package.json
-└── ...
-```
-
----
-
-### Phase 4: Use `claw` to build — Frontend
-
-```bash
-npx claw --workdir . \
-  "Build the React + Vite frontend for DAGClaw.
-   Scaffold with Vite + React-TS. Add Tailwind CSS, xterm.js, Zustand.
-   Build components: Sidebar, CreateTaskForm, TaskTreeView, TaskTreeNode,
-   StageIndicator, DetailPanel, PlanView, ExecutionView, SubtaskTerminal,
-   VerifyView, ApprovalBanner.
-   Refer to PLAN.md for the frontend architecture, component tree,
-   Zustand store shape, and WebSocket protocol."
-```
-
----
-
-### Phase 5: Use `claw` to build — Polish & Integration
-
-```bash
-npx claw --workdir . \
-  "Polish the DAGClaw application:
-   1. Add error handling for SDK failures, WebSocket disconnects, reconnection logic
-   2. Add cancellation propagation (cancel root → cancel all descendants)
-   3. Add concurrency tuning (MAX_CONCURRENT_INSTANCES env var)
-   4. Responsive frontend layout
-   5. Update CLAUDE.md with dev commands
-   6. Update README.md with setup and usage instructions"
-```
-
----
-
-### Summary: What's hand-written vs. self-built
-
-| Component | How it's built | Status |
-|-----------|---------------|--------|
-| Core types (`types.ts`) | Claude Code direct (Phase 0) | ✅ Done |
-| `ClaudeRunner` | Claude Code direct (Phase 0) | ✅ Done |
-| Built-in stage definitions | Claude Code direct (Phase 0) | ✅ Done |
-| `DependencyResolver` | Claude Code direct (Phase 0) | ✅ Done |
-| `TaskOrchestrator` (basic) | Claude Code direct (Phase 0) | ✅ Done |
-| `TaskManager` (minimal) | Claude Code direct (Phase 0) | ✅ Done |
-| CLI entry point | Claude Code direct (Phase 0) | ✅ Done |
-| End-to-end validation | Continuous (`test_scripts/`) | Ongoing |
-| Recursive decomposition | Built by claw (Phase 1) | ✅ Done |
-| Custom stages + pipeline-aware planning | Phase 2 | ✅ Done |
-| Live DAG display + cost summary | Phase 2.5 | ✅ Done |
-| Express + WebSocket backend | Built by claw (Phase 3) | ✅ Done |
-| React frontend | Built by claw (Phase 4) | ✅ Done |
-| Polish & integration | Phase 5 | ✅ Done |
+- Memory distillation is stubbed (`worthDistilling` flag exists but pipeline not wired)
+- No execute-level retry (only verify-level retry exists)
+- No per-worker model selection (all workers use same model)
+- Frontend lacks: activity timeline, cost/token display, context visualization, run history browser
+- No context budget enforcement (prompt assembly has no size limits)
+- No plan replay / dry run mode
+- No per-subtask resume on failure
 
 ## Key Design Decisions
 
@@ -1041,31 +823,97 @@ This gives users a natural "pick up where I left off" workflow.
 
 ---
 
-## Future Roadmap (post v0.1.0)
+## Future Roadmap
 
-Features identified but explicitly deferred:
+### v0.1.1 — Next (interleaved backend + frontend)
 
-| Feature | Version | Notes |
-|---------|---------|-------|
-| Execute-level retry | v0.1.1 | DAG runner retries failed subtasks before cascade-skipping. Stage config `maxAttempts` controls retry count. Executor output gains `retryWorthy: boolean` — agents signal whether failure is transient (network, flaky test) vs permanent (permission denied, missing prereq). DAG runner skips retry when `retryWorthy: false`. |
-| Memory distillation pipeline | v0.1.1 | Activate dead `worthDistilling` flag. After successful run where `plan.worthDistilling === true`, run a distillation Claude CLI call that reads plan + subtask summaries + verification result and generates a memory entry. New `core/memoryDistiller.ts` (~100 lines), minor hook in `taskOrchestrator.ts`. |
-| Advanced context management | v0.2+ | Context budget enforcement in `runOne()` — add `contextBudget` to CliOptions, enforce after prompt assembly. Over budget: drop snapshots (compact tier first, oldest transitive deps). ~50-80 lines in `promptBuilder.ts`. Future: relevance scoring (file overlap), on-demand context tool, context compression for deep DAGs, toxicity detection. |
-| Sandbox abstraction | v0.2+ | Expanded from git worktree isolation. `sandbox?: 'shared' \| 'worktree'` on SubtaskSchema (planner decides per-subtask). New `core/sandboxManager.ts` (~200 lines) for worktree lifecycle. Docker deferred — worktree covers 90% of code task use cases. |
-| Plan replay / dry run | v0.2+ | `--plan <runId>`: load plan.json from previous run, skip Plan stage. `--dry-run`: run Plan stage only, display plan, exit. ~50 lines in cli.ts and taskOrchestrator.ts. Unique advantage over emergent-execution systems. |
-| Per-subtask resume | v0.2+ | On run failure, manifest records which subtasks completed successfully. `--resume <runId>`: reload plan, skip completed subtasks, re-run from failure point. More granular than plan replay — avoids re-running successful work. ~80 lines in taskOrchestrator.ts. Inspired by Lobster's checkpoint tokens. |
-| Stage lifecycle hooks | v0.2+ | `preRun?` and `postRun?` optional hooks on StageDefinition. NOT middleware — two hooks only. Orchestrator stays stage-agnostic. ~30 lines. |
-| External task runner | v0.2+ | `runner: 'claude' \| 'external'` discriminator on StageRunnerConfig. New `runExternal()` in claudeRunner.ts (~150 lines). Shell commands with streaming stdout/stderr capture to log files. Verify stage references external run output for validation. |
-| CI integration | v0.2+ | Trigger a templated task pipeline on CI failure (just another task, no special handling) |
-| Shareable stage presets | v0.2+ | Reframed from skill packs. Importable config fragments (`dagclaw.presets/`) for reusable StageDefinition bundles. No separate skills system — memory + custom stages + plan replay cover all use cases. |
-| Per-subtask tool scoping | v0.3+ | Planner restricts allowed tools per subtask via `allowedTools` field in SubtaskSchema. |
-| Structured memory with tags | v0.3+ | Frontmatter tags in `.dagclaw/memory/*.md`, `--memory-dir` flag, tag-based filtering for context injection. |
-| Run comparison / diff | v0.3+ | `dagclaw diff <id1> <id2>` — compare plans, costs, outcomes between two runs. |
-| Native Agent Teams integration | v0.3+ | Use Claude Code's built-in swarm as an optional Execute backend |
-| Messaging platform integration | v0.3+ | Trigger runs from Slack/Discord/Telegram, receive status updates |
-| Heartbeat/cron scheduling | v0.3+ | Useful when managing large worker trees on long-running projects |
-| Distributed deployment | v0.4+ | Remote executors for compute-heavy subtasks, worker node management |
-| Community tool ecosystem | v0.4+ | Community-contributed stages, presets, integrations |
-| Per-worker model selection | v0.2+ | `--model` flag for global default, `--dag-model` for DAG subtask override. Add `model?: string` to `RunClaudeOptions`, `StageRunnerConfig`, `CliOptions`. Thread through `claudeRunner.ts` as `--model` arg to `claude` CLI. Per-stage model in `dagclaw.config.json`. Enables Opus for Plan/Verify + Sonnet for Execute workers to reduce cost. ~40 lines across types/cli/runner. |
+**Backend:**
+- **Memory distillation pipeline** — Activate `worthDistilling` flag. After successful run, distillation Claude call generates memory entries. New `core/memoryDistiller.ts` (~100 lines).
+- **Execute-level retry** — DAG runner retries failed subtasks before cascade-skipping. `maxAttempts` on stage config, `retryWorthy: boolean` on executor output.
+- **Per-worker model selection** — `--model` for global default, `--dag-model` for DAG override, per-stage model in `dagclaw.config.json`. Enables Opus for Plan/Verify + Sonnet for Execute.
+
+**Frontend:**
+- Activity timeline (event log with timestamps)
+- Cost/token display per stage and total
+- Task lifecycle controls (cancel, retry from UI)
+- Permission mode selector
+- Run history browser
+
+### v0.2 — Context management + visualization
+
+**Backend:**
+- **Advanced context management** — Budget enforcement in `runOne()`, drop strategies (compact tier first, oldest transitive deps), relevance scoring.
+- **Plan replay / dry run** — `--plan <runId>` to reuse previous plan, `--dry-run` to plan-only.
+- **Per-subtask resume** — `--resume <runId>` reloads plan, skips completed subtasks, re-runs from failure point.
+- **Stage lifecycle hooks** — `preRun?` / `postRun?` on StageDefinition. Two hooks only, orchestrator stays stage-agnostic.
+- **Sandbox abstraction** — `sandbox?: 'shared' | 'worktree'` per subtask. Git worktree lifecycle management.
+
+**Frontend:**
+- Context flow visualization (what context each subtask receives)
+- Memory panel (view/edit `.dagclaw/memory/`)
+- Prompt inspector (view exact prompts sent to Claude)
+- DAG graph visualization (interactive dependency graph)
+
+### v0.3 — Ecosystem
+
+- Per-subtask tool scoping (`allowedTools` field in SubtaskSchema, planner restricts tools)
+- Structured memory with frontmatter tags, `--memory-dir` flag, tag-based filtering for context injection
+- Run comparison / diff (`dagclaw diff <id1> <id2>` — compare plans, costs, outcomes)
+- Shareable stage presets — importable config fragments (`dagclaw.presets/`) for reusable StageDefinition bundles
+- CI integration — trigger templated task pipelines on CI failure (just another task, no special handling)
+- Pipeline builder UI (visual pipeline composition)
+- Keyboard shortcuts, notifications, responsive layout
+
+### v0.4 — Remote runners (reasoning/action decoupling)
+
+The core insight: **reasoning (reading code, planning, writing code) and action (running tests, builds, deploys) are fundamentally different workloads.** Reasoning needs large context windows and expensive models. Action needs compute, filesystem access, and specific toolchains — but minimal intelligence. Today, a single Claude CLI instance does both, which means an Opus-class model sits idle watching `npm test` run for 30 seconds.
+
+DAGClaw's lightweight orchestrator is uniquely positioned to dewrite this split. The orchestrator already treats each subtask as an independent unit with scoped context — adding a `runner` discriminator is a natural extension, not an architectural change.
+
+**Remote runner architecture:**
+
+1. **Runner abstraction** — `runner: 'claude' | 'shell' | 'remote'` discriminator on `StageRunnerConfig`.
+   - `claude` (default): current behavior, Claude CLI instance
+   - `shell`: local shell command execution with streaming stdout/stderr capture. For build/test/lint stages that don't need AI reasoning.
+   - `remote`: dispatch to a remote executor node via HTTP/WebSocket. Same interface as local, but runs on a different machine.
+
+2. **Shell runner** (`core/shellRunner.ts`, ~150 lines) — Execute arbitrary shell commands as stage actions. Streaming output captured to log files. Exit code determines success/failure. Verify stage can reference shell output for validation. Enables stages like:
+   - `Build`: `runner: 'shell', command: 'npm run build'`
+   - `Test`: `runner: 'shell', command: 'npm test'`
+   - `Lint`: `runner: 'shell', command: 'eslint src/'`
+   - `Deploy`: `runner: 'shell', command: 'kubectl apply -f deploy/'`
+
+3. **Remote executor protocol** — Lightweight HTTP API for remote worker nodes:
+   - `POST /execute` — accept a task payload (runner config, working directory context, environment)
+   - `GET /execute/:id/stream` — SSE stream of stdout/stderr
+   - `POST /execute/:id/cancel` — abort running task
+   - `GET /health` — worker health check (load, available resources)
+   - Workers are stateless — they receive everything they need in the request (or pull from a shared filesystem/git remote)
+
+4. **Worker pool management** — Orchestrator maintains a registry of available workers:
+   - Static config in `dagclaw.config.json`: `workers: [{ url: "http://gpu-box:3002", tags: ["gpu", "build"] }]`
+   - Tag-based routing: planner assigns `workerTags` per subtask, orchestrator matches to available workers
+   - Health monitoring with automatic failover to local execution
+   - Concurrency tracking per worker (respect remote resource limits)
+
+5. **Typical company workflow** — matches how teams actually work:
+   - **Dev machine** (laptop): runs DAGClaw orchestrator + Claude reasoning (Plan, code-writing Execute subtasks, Verify)
+   - **Build server** (beefy CI box): runs shell stages (test suites, builds, linting, type-checking)
+   - **GPU server**: runs compute-heavy stages (ML training, large data processing)
+   - The orchestrator coordinates all of this from one DAG — same plan, same audit trail, same cost tracking
+
+6. **Implementation phases:**
+   - v0.4.0: Shell runner (local) — `runner: 'shell'` on StageRunnerConfig, `core/shellRunner.ts`
+   - v0.4.1: Remote executor — `runner: 'remote'`, HTTP dispatch, SSE streaming
+   - v0.4.2: Worker pool — static config, tag-based routing, health checks, failover
+   - v0.4.3: Worker UI — frontend panel showing worker status, remote task logs, resource utilization
+
+### v0.5+ — Platform
+
+- Messaging platform integration (Slack/Discord/Telegram: trigger runs, receive status)
+- Heartbeat/cron scheduling (long-running project management, periodic tasks)
+- Community tool ecosystem (community-contributed stages, presets, worker images)
+- Distributed git worktree sync (workers clone/pull automatically for sandboxed execution)
 
 ---
 
