@@ -703,7 +703,7 @@ npx claw --workdir . \
 | Recursive decomposition | Built by claw (Phase 1) | ✅ Done |
 | Custom stages + pipeline-aware planning | Phase 2 | ✅ Done |
 | Live DAG display + cost summary | Phase 2.5 | ✅ Done |
-| Express + WebSocket backend | Built by claw (Phase 3) | Not started |
+| Express + WebSocket backend | Built by claw (Phase 3) | ✅ Done |
 | React frontend | Built by claw (Phase 4) | Not started |
 | Polish & integration | Built by claw (Phase 5) | Not started |
 

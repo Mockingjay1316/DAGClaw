@@ -1,10 +1,10 @@
-# Claw UI — Developer Guide
+# DAGClaw — Developer Guide
 
 A reading guide for programmers maintaining this codebase.
 
 ## What This Project Does
 
-Claw UI is an orchestration engine that decomposes software engineering tasks into subtasks and runs them through a **Plan → Execute → Verify** pipeline using Claude Code as the backend. It has two interfaces: a CLI for direct terminal use, and an Express + WebSocket backend server for remote/programmatic access. It handles parallel execution via DAG scheduling, automatic retries on verification failure, recursive decomposition of complex subtasks, and persistent logging of every run.
+DAGClaw is an orchestration engine that decomposes software engineering tasks into subtasks and runs them through a **Plan → Execute → Verify** pipeline using Claude Code as the backend. It has two interfaces: a CLI for direct terminal use, and an Express + WebSocket backend server for remote/programmatic access. It handles parallel execution via DAG scheduling, automatic retries on verification failure, recursive decomposition of complex subtasks, and persistent logging of every run.
 
 ## Source Files at a Glance
 
@@ -13,12 +13,12 @@ core/                          Shared orchestration engine
 ├── taskOrchestrator.ts        The engine. Drives stages, schedules DAGs, handles retries.
 ├── claudeRunner.ts            Spawns `claude -p` subprocesses, parses output, tracks cost.
 ├── stageDefinitions.ts        Stage configs: Plan, Execute, Verify. All stage-specific logic lives here.
-├── configLoader.ts            Custom stage loading from claw.config.json/.ts, merging with builtins.
+├── configLoader.ts            Custom stage loading from dagclaw.config.json/.ts, merging with builtins.
 ├── promptBuilder.ts           Template interpolation and snapshot formatting.
 ├── dependencyResolver.ts      Topological sort for the subtask DAG.
 ├── taskManager.ts             Lockfile management and task node factory.
 ├── runLogger.ts               Writes manifests, logs, prompts, and verification results to disk.
-├── memoryManager.ts           Reads/writes .claw/memory/ markdown files.
+├── memoryManager.ts           Reads/writes .dagclaw/memory/ markdown files.
 └── types.ts                   All interfaces, Zod schemas, and type definitions.
 
 cli/                           Terminal interface
@@ -51,7 +51,7 @@ A mutable object that flows through every stage. Each stage reads what it needs 
 - `plan` — set by Plan stage, read by Execute and Verify
 - `subtaskSnapshots` — set by Execute (one per subtask), read by Verify
 - `verification` — set by Verify, read by the retry loop
-- `memoryContext` — loaded once at the start from `.claw/memory/`
+- `memoryContext` — loaded once at the start from `.dagclaw/memory/`
 - `skippedIndices` — accumulated by the DAG runner when subtasks fail
 - `dagPalette` — stages available for DAG subtask assignment (from `--dag-stages`)
 - `postStages` — mandatory stages after DAG (derived from pipeline)
@@ -70,7 +70,7 @@ The key abstraction. Every stage (Plan, Execute, Verify) is defined as a config 
 ### Structured Output via Files
 
 Agents don't return structured data through stdout. Instead:
-1. The prompt tells the agent to write JSON to a run-scoped tmp path (e.g., `.claw/runs/<runId>/tmp/plan.json`)
+1. The prompt tells the agent to write JSON to a run-scoped tmp path (e.g., `.dagclaw/runs/<runId>/tmp/plan.json`)
 2. The agent uses the Write tool to create that file
 3. The orchestrator's `runOne()` reads and validates the file via the stage's declared `outputSchema` (Zod)
 4. The validated result is passed to `resultHandler` — stages never do their own file I/O
@@ -228,7 +228,7 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
 
 ### `core/configLoader.ts` — Custom Stage Loading
 
-Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.config.json` (Zod-validated fallback). Merges with `BUILTIN_STAGES` via `mergeStages()`. Reserved names (Plan, Execute, Verify) require `overrideBuiltin: true`.
+Loads custom stages from `dagclaw.config.ts` (dynamic import, priority) or `dagclaw.config.json` (Zod-validated fallback). Merges with `BUILTIN_STAGES` via `mergeStages()`. Reserved names (Plan, Execute, Verify) require `overrideBuiltin: true`.
 
 - `loadCustomStages(projectDir)` — discovers and loads config file
 - `mergeStages(builtins, custom)` — merges with reserved name protection
@@ -251,7 +251,7 @@ Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.co
 
 ### `core/taskManager.ts` — Lock, Task Factory & Registry
 
-- `acquireLock(workDir, runId)` — creates `.claw/lock` with PID. Throws if another instance is running.
+- `acquireLock(workDir, runId)` — creates `.dagclaw/lock` with PID. Throws if another instance is running.
 - `releaseLock(workDir)` — removes the lock file
 - `checkStaleLock(workDir)` — detects lock from a dead process (checks `process.kill(pid, 0)`), cleans up
 - `createTaskNode(options)` — factory for TaskNode objects
@@ -264,7 +264,7 @@ Loads custom stages from `claw.config.ts` (dynamic import, priority) or `claw.co
 
 ### `core/runLogger.ts` — Persistent Logging
 
-Writes everything to `.claw/runs/<runId>/`:
+Writes everything to `.dagclaw/runs/<runId>/`:
 
 - `initRun()` — creates directory structure + initial manifest, sets `currentRunId` for run-scoped tmp
 - `writePlan()` — saves plan JSON
@@ -276,11 +276,11 @@ Writes everything to `.claw/runs/<runId>/`:
 - `recalcTotals()` — sums perStage + perSubtask into totals
 - `listRuns()` — reads all manifests, returns sorted summaries
 - `createChildLogger(parentRunId)` — creates a nested logger for child runs (logs go under `parent/children/childRunId/`)
-- `cleanTmp()` / `tmpPath()` — run-scoped tmp directories (`.claw/runs/<runId>/tmp/`), isolated per orchestrator instance
+- `cleanTmp()` / `tmpPath()` — run-scoped tmp directories (`.dagclaw/runs/<runId>/tmp/`), isolated per orchestrator instance
 
 ### `core/memoryManager.ts` — Knowledge Injection
 
-Reads `.claw/memory/*.md` files and formats them as a context block injected into prompts:
+Reads `.dagclaw/memory/*.md` files and formats them as a context block injected into prompts:
 - `readAll()` — concatenates all markdown files with headers
 - `buildContextBlock(maxChars?)` — wraps with `--- Project Memory ---` header, optional truncation
 - `writeFile()` / `readFile()` — for future memory distillation
@@ -288,7 +288,7 @@ Reads `.claw/memory/*.md` files and formats them as a context block injected int
 ## How to Add a Custom Stage
 
 **Option A: Config file (declarative)**
-1. Create `claw.config.json` in your project root:
+1. Create `dagclaw.config.json` in your project root:
    ```json
    {
      "stages": {
@@ -307,7 +307,7 @@ Reads `.claw/memory/*.md` files and formats them as a context block injected int
 3. To make the planner assign it to DAG subtasks: `--dag-stages "Execute,Lint"`
 
 **Option B: TypeScript config (full control)**
-1. Create `claw.config.ts` with `export default { stages: { ... } }` using full `StageDefinition` objects with function fields.
+1. Create `dagclaw.config.ts` with `export default { stages: { ... } }` using full `StageDefinition` objects with function fields.
 
 **Option C: Built-in (for core stages)**
 1. Define a `StageDefinition` in `stageDefinitions.ts`, add to `BUILTIN_STAGES`
@@ -428,11 +428,11 @@ bash test_scripts/e2e-dag-stages.sh   # per-subtask stage routing
 
 1. **Stage-agnostic orchestrator** — all stage differences expressed through `StageDefinition` config, not if/else branches
 2. **Single execution primitive** — `runOne()` handles both standalone stages and individual subtasks within parallel stages
-3. **Structured output via files** — agents write JSON to run-scoped tmp dirs (`.claw/runs/<runId>/tmp/`), orchestrator validates via each stage's declared `outputSchema` (Zod) and passes parsed data to `resultHandler`. Stages never do their own file I/O. Each orchestrator instance gets isolated tmp.
+3. **Structured output via files** — agents write JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`), orchestrator validates via each stage's declared `outputSchema` (Zod) and passes parsed data to `resultHandler`. Stages never do their own file I/O. Each orchestrator instance gets isolated tmp.
 4. **Data-driven retry** — `retryStage` field on StageDefinition tells the orchestrator what to re-run. No hardcoded stage names in retry logic.
 5. **Cascade-skip via throw** — Execute `resultHandler` throws on `success: false`, caught by `Promise.allSettled` in DAG runner, which calls `markSkipped()` to cascade.
 6. **Immutable run logs** — every prompt, output, and verification attempt is preserved with numbering. Nothing is overwritten.
 7. **System prompt interpolation** — both system prompts and prompt templates are interpolated with `{{key}}` placeholders from `contextBuilder`. Enables runtime injection of pipeline metadata (DAG palette, post-stages) into the planner.
 8. **Per-subtask stage routing** — subtasks can specify a `stage` field to run through different stage definitions. The Plan stage validates stage references against the DAG palette. Only Execute-stage subtasks can be recursively decomposed.
-9. **Custom stages via config** — `claw.config.json` (declarative, Zod-validated) or `claw.config.ts` (full `StageDefinition` with functions). Merged with built-ins at startup. Reserved names protected.
+9. **Custom stages via config** — `dagclaw.config.json` (declarative, Zod-validated) or `dagclaw.config.ts` (full `StageDefinition` with functions). Merged with built-ins at startup. Reserved names protected.
 10. **DagDisplay as sole stdout coordinator** — during active DAG display, all stdout writes go through `DagDisplay.writeStatus()` (via `dagAwareLog` in cli.ts) to prevent interleaved writes from breaking ANSI cursor math.

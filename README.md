@@ -1,4 +1,4 @@
-# Claw UI
+# DAGClaw
 
 A multi-stage recursive orchestration engine for Claude Code. Decomposes software engineering tasks into subtasks via a **Plan → Execute → Verify** pipeline, running subtasks in parallel via DAG scheduling with automatic retry on verification failure. Includes a CLI for direct terminal use and an Express + WebSocket backend server for remote/programmatic access.
 
@@ -11,18 +11,18 @@ A multi-stage recursive orchestration engine for Claude Code. Decomposes softwar
 npm install
 
 # Run a task (CLI)
-node --import tsx bin/claw.js "Add error handling to the auth module"
+node --import tsx bin/dagclaw.js "Add error handling to the auth module"
 
 # With options
-node --import tsx bin/claw.js \
+node --import tsx bin/dagclaw.js \
   --workdir ./my-project \
   --yolo \
   --max-concurrency 5 \
   "Refactor the database layer"
 
 # View run history
-node --import tsx bin/claw.js runs
-node --import tsx bin/claw.js runs --last
+node --import tsx bin/dagclaw.js runs
+node --import tsx bin/dagclaw.js runs --last
 
 # Start the backend server
 node --import tsx backend/src/index.ts
@@ -63,7 +63,7 @@ node --import tsx backend/src/index.ts
 ## CLI Options
 
 ```
-Usage: claw [options] "your task description"
+Usage: dagclaw [options] "your task description"
 
 Options:
   --workdir <path>         Working directory (default: current dir)
@@ -74,12 +74,12 @@ Options:
   --timeout <seconds>      Per-stage timeout (default: 300)
   --yolo                   Full auto mode: skip plan approval, auto permissions
   --auto-approve           Skip plan approval prompt
-  --no-memory              Don't inject .claw/memory/ context
+  --no-memory              Don't inject .dagclaw/memory/ context
   --no-summary             Skip cost summary
 
 Subcommands:
-  claw runs                List all runs
-  claw runs --last         Show details of the most recent run
+  dagclaw runs                List all runs
+  dagclaw runs --last         Show details of the most recent run
 ```
 
 ## Permission Modes
@@ -90,10 +90,10 @@ Subcommands:
 
 ## Project Memory
 
-Claw injects project knowledge from `.claw/memory/*.md` into every Claude instance:
+DAGClaw injects project knowledge from `.dagclaw/memory/*.md` into every Claude instance:
 
 ```
-.claw/memory/
+.dagclaw/memory/
 ├── conventions.md    # coding standards, naming patterns
 ├── patterns.md       # what worked in past runs
 └── errors.md         # recurring issues and solutions
@@ -103,10 +103,10 @@ Create these files manually to guide Claude's planning and execution. Memory is 
 
 ## Run Logs
 
-Every run is persisted to `.claw/runs/<run-id>/`:
+Every run is persisted to `.dagclaw/runs/<run-id>/`:
 
 ```
-.claw/runs/2026-03-05T18-26-46_7ea06bfd/
+.dagclaw/runs/2026-03-05T18-26-46_7ea06bfd/
 ├── manifest.json          # run metadata, status, timing, cost
 ├── plan.json              # structured plan output
 ├── tmp/                   # run-scoped structured output (persisted)
@@ -237,12 +237,12 @@ core/                          Shared orchestration engine
 ├── taskOrchestrator.ts        Pipeline driver, DAG scheduling, retry, recursive decomposition
 ├── claudeRunner.ts            Claude CLI subprocess spawning, output parsing
 ├── stageDefinitions.ts        Built-in Plan/Execute/Verify stage configs
-├── configLoader.ts            Custom stage loading from claw.config.json/.ts
+├── configLoader.ts            Custom stage loading from dagclaw.config.json/.ts
 ├── promptBuilder.ts           Template interpolation, snapshot formatting
 ├── dependencyResolver.ts      Topological sort, cycle detection
 ├── taskManager.ts             Lockfile management, task node factory, TaskRegistry
-├── runLogger.ts               Persistent run logging to .claw/runs/
-├── memoryManager.ts           .claw/memory/ read/write
+├── runLogger.ts               Persistent run logging to .dagclaw/runs/
+├── memoryManager.ts           .dagclaw/memory/ read/write
 └── types.ts                   All interfaces and Zod schemas
 
 cli/                           Terminal interface
@@ -259,7 +259,7 @@ backend/                       Express + WebSocket server
 └── __tests__/                 Backend tests (60 tests)
 ```
 
-See [HUMAN.md](HUMAN.md) for a detailed developer guide, [DATAFLOW.md](DATAFLOW.md) for call graphs and data flow diagrams, and [PLAN.md](PLAN.md) for the full system architecture and roadmap.
+See [HUMAN.md](HUMAN.md) for a detailed developer guide, [docs/DATAFLOW.md](docs/DATAFLOW.md) for call graphs and data flow diagrams, and [docs/PLAN.md](docs/PLAN.md) for the full system architecture and roadmap.
 
 ## Current Status
 
