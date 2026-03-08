@@ -7,6 +7,41 @@
 
 import type { DAGEvent } from '../core/types.ts';
 
+// --- Elapsed time formatting ---
+
+/** Format elapsed ms as human-readable: "45s", "3m 24s", "1h 05m 30s". */
+export function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const hours = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (hours > 0) {
+    return `${hours}h ${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
+  }
+  return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+}
+
+// --- ANSI-aware line truncation ---
+
+/** Count visible (non-ANSI) characters in a string. */
+export function visibleLength(str: string): number {
+  // Strip ANSI escape sequences
+  return str.replace(/\x1b\[[0-9;]*m/g, '').length;
+}
+
+/** Max visible characters for subtask descriptions in display output. */
+const DESC_MAX_LEN = 40;
+
+/**
+ * Truncate a plain text description to maxLen visible characters.
+ * Appends '...' when truncated.
+ */
+export function truncateDesc(desc: string, maxLen: number = DESC_MAX_LEN): string {
+  if (desc.length <= maxLen) return desc;
+  return desc.slice(0, maxLen) + '...';
+}
+
 interface DisplayEntry {
   index: number;
   description: string;
@@ -161,7 +196,7 @@ export class DagDisplay {
   private renderStageLine(): void {
     const elapsed = this.stageStartTime ? Date.now() - this.stageStartTime : 0;
     const sec = Math.round(elapsed / 1000);
-    const line = `${this.stageLabel} (${sec}s)`;
+    const line = `${this.stageLabel} (${formatElapsed(elapsed)})`;
 
     if (this.isTTY) {
       this.eraseMutableZone();
@@ -317,27 +352,22 @@ export class DagDisplay {
   private formatEntry(entry: DisplayEntry): string {
     const tag = `[${entry.stage}]`;
     const idx = `[${entry.index}]`;
-    const desc = entry.description;
+    const desc = truncateDesc(entry.description);
 
     switch (entry.state) {
       case 'completed':
-        return `${tag} ${idx} ${desc} -- done (${this.formatElapsed(entry.elapsed ?? 0)})`;
+        return `${tag} ${idx} ${desc} -- done (${formatElapsed(entry.elapsed ?? 0)})`;
       case 'failed':
-        return `${tag} ${idx} ${desc} -- FAILED (${this.formatElapsed(entry.elapsed ?? 0)})`;
+        return `${tag} ${idx} ${desc} -- FAILED (${formatElapsed(entry.elapsed ?? 0)})`;
       case 'skipped':
         return `${tag} ${idx} ${desc} -- skipped (cascade from ${entry.cascadeFrom})`;
       case 'running': {
         const elapsed = entry.startTime ? Date.now() - entry.startTime : 0;
-        return `${tag} ${idx} ${desc} -- running... (${this.formatElapsed(elapsed)})`;
+        return `${tag} ${idx} ${desc} -- running... (${formatElapsed(elapsed)})`;
       }
       case 'waiting':
         return `${tag} ${idx} ${desc} -- waiting`;
     }
-  }
-
-  private formatElapsed(ms: number): string {
-    const s = Math.round(ms / 1000);
-    return `${s}s`;
   }
 
   /** Subtasks that are waiting AND have at least one unmet dependency. */

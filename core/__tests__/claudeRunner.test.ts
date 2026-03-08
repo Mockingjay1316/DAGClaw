@@ -4,6 +4,7 @@ import {
   parseUsageFromCliOutput,
   estimateCost,
   checkClaudeCli,
+  ClaudeRunError,
 } from '../claudeRunner.ts';
 
 describe('claudeRunner', () => {
@@ -59,4 +60,30 @@ describe('claudeRunner', () => {
     });
   });
 
+  describe('ClaudeRunError', () => {
+    it('stores partial output and exit code', () => {
+      const err = new ClaudeRunError('timed out', 'partial stdout content', null);
+      assert.equal(err.message, 'timed out');
+      assert.equal(err.partialOutput, 'partial stdout content');
+      assert.equal(err.exitCode, null);
+      assert.equal(err.name, 'ClaudeRunError');
+    });
+
+    it('stores numeric exit code', () => {
+      const err = new ClaudeRunError('exited with code 1', 'some output', 1);
+      assert.equal(err.exitCode, 1);
+      assert.equal(err.partialOutput, 'some output');
+    });
+
+    it('is an instance of Error', () => {
+      const err = new ClaudeRunError('test', '', null);
+      assert.ok(err instanceof Error);
+      assert.ok(err instanceof ClaudeRunError);
+    });
+
+    it('handles empty partial output', () => {
+      const err = new ClaudeRunError('failed', '', 2);
+      assert.equal(err.partialOutput, '');
+    });
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Writable } from 'node:stream';
-import { DagDisplay } from '../dagDisplay.ts';
+import { DagDisplay, truncateDesc, visibleLength, formatElapsed } from '../dagDisplay.ts';
 import type { DAGEvent } from '../../core/types.ts';
 
 /** Create a mock writable stream that captures output. */
@@ -260,6 +260,109 @@ describe('DagDisplay', () => {
 
       // After stageEnd, ANSI erase code should be present (clearing the mutable line)
       assert.ok(stream.output.includes('\x1b['));
+    });
+  });
+
+  describe('truncateDesc', () => {
+    it('returns string unchanged when shorter than maxLen', () => {
+      assert.equal(truncateDesc('hello', 10), 'hello');
+    });
+
+    it('truncates string longer than maxLen with ...', () => {
+      const result = truncateDesc('hello world this is long', 10);
+      assert.equal(result, 'hello worl...');
+    });
+
+    it('uses default maxLen of 40', () => {
+      const short = 'Short description';
+      assert.equal(truncateDesc(short), short);
+
+      const long = 'A'.repeat(50);
+      const result = truncateDesc(long);
+      assert.equal(result, 'A'.repeat(40) + '...');
+    });
+
+    it('handles empty string', () => {
+      assert.equal(truncateDesc('', 10), '');
+    });
+
+    it('handles exact maxLen', () => {
+      assert.equal(truncateDesc('hello', 5), 'hello');
+    });
+  });
+
+  describe('visibleLength', () => {
+    it('counts visible chars ignoring ANSI codes', () => {
+      assert.equal(visibleLength('\x1b[31mhello\x1b[0m'), 5);
+    });
+
+    it('counts plain string length', () => {
+      assert.equal(visibleLength('hello'), 5);
+    });
+
+    it('returns 0 for empty string', () => {
+      assert.equal(visibleLength(''), 0);
+    });
+  });
+
+  describe('formatElapsed', () => {
+    it('formats under 60s as seconds only', () => {
+      assert.equal(formatElapsed(5000), '5s');
+      assert.equal(formatElapsed(45000), '45s');
+      assert.equal(formatElapsed(0), '0s');
+    });
+
+    it('formats 60s+ as Xm YYs', () => {
+      assert.equal(formatElapsed(60000), '1m 00s');
+      assert.equal(formatElapsed(90000), '1m 30s');
+      assert.equal(formatElapsed(204000), '3m 24s');
+    });
+
+    it('formats over 1 hour with hours', () => {
+      assert.equal(formatElapsed(3661000), '1h 01m 01s');
+      assert.equal(formatElapsed(7200000), '2h 00m 00s');
+    });
+
+    it('zero-pads minutes and seconds', () => {
+      assert.equal(formatElapsed(61000), '1m 01s');
+    });
+  });
+
+  describe('description truncation in display', () => {
+    it('truncates long descriptions to 40 chars with ... suffix', () => {
+      const stream = createMockStream(false);
+      const display = new DagDisplay(stream);
+
+      const longDesc = 'This is a very long description that should be truncated when displayed';
+      const subtasks = [
+        { index: 0, description: longDesc, dependencies: [], stage: 'Execute' },
+      ];
+      display.handleEvent({ type: 'dag-start', subtasks });
+      display.handleEvent({ type: 'subtask-started', index: 0 });
+
+      // Description should be truncated but status suffix should be visible
+      const lines = stream.output.split('\n').filter(l => l.includes('[0]'));
+      for (const line of lines) {
+        assert.ok(line.includes('...'), `Should contain ... truncation marker: ${line}`);
+        assert.ok(line.includes('running'), `Status suffix should always be visible: ${line}`);
+      }
+      display.finalize();
+    });
+
+    it('does not truncate short descriptions', () => {
+      const stream = createMockStream(false);
+      const display = new DagDisplay(stream);
+
+      const subtasks = [
+        { index: 0, description: 'Set up routes', dependencies: [], stage: 'Execute' },
+      ];
+      display.handleEvent({ type: 'dag-start', subtasks });
+      display.handleEvent({ type: 'subtask-started', index: 0 });
+
+      const lines = stream.output.split('\n').filter(l => l.includes('[0]') && l.includes('running'));
+      assert.ok(lines.length > 0);
+      assert.ok(lines[0].includes('Set up routes'), 'Full description should be visible');
+      display.finalize();
     });
   });
 

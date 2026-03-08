@@ -102,6 +102,21 @@ export function parseStageOutputFile(schema: { parse: (data: unknown) => unknown
   }
 }
 
+// --- Error class with partial output ---
+
+/** Error thrown when Claude CLI fails, preserving any partial output. */
+export class ClaudeRunError extends Error {
+  public readonly partialOutput: string;
+  public readonly exitCode: number | null;
+
+  constructor(message: string, partialOutput: string, exitCode: number | null = null) {
+    super(message);
+    this.name = 'ClaudeRunError';
+    this.partialOutput = partialOutput;
+    this.exitCode = exitCode;
+  }
+}
+
 // --- Claude CLI execution ---
 
 export interface RunClaudeOptions {
@@ -155,14 +170,22 @@ export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaude
     if (options.timeoutMs) {
       timer = setTimeout(() => {
         child.kill('SIGTERM');
-        reject(new Error(`Claude CLI timed out after ${options.timeoutMs}ms`));
+        reject(new ClaudeRunError(
+          `Claude CLI timed out after ${options.timeoutMs}ms`,
+          stdout,
+          null,
+        ));
       }, options.timeoutMs);
     }
 
     child.on('close', (code) => {
       if (timer) clearTimeout(timer);
       if (code !== 0 && code !== null) {
-        reject(new Error(`Claude CLI exited with code ${code}: ${stderr}`));
+        reject(new ClaudeRunError(
+          `Claude CLI exited with code ${code}: ${stderr}`,
+          stdout,
+          code,
+        ));
         return;
       }
 

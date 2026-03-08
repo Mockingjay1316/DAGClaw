@@ -3,8 +3,9 @@
  */
 
 import { createInterface } from 'node:readline';
+import { resolve } from 'node:path';
 import type { CliOptions, RunnerBackend } from '../core/types.ts';
-import { TaskOrchestrator } from '../core/taskOrchestrator.ts';
+import { TaskOrchestrator, formatDuration } from '../core/taskOrchestrator.ts';
 import { RunLogger } from '../core/runLogger.ts';
 import { loadAndMergeStages } from '../core/configLoader.ts';
 import { DagDisplay } from './dagDisplay.ts';
@@ -71,7 +72,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       subcommand: 'runs',
       runsLast: flags.last === true,
       prompt: '',
-      workDir: (flags.workDir as string) || process.cwd(),
+      workDir: flags.workDir ? resolve(flags.workDir as string) : process.cwd(),
       pipeline: DEFAULTS.pipeline,
       backend: DEFAULTS.backend,
       permissionMode: DEFAULTS.permissionMode,
@@ -105,7 +106,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   return {
     prompt,
-    workDir: (flags.workDir as string) || process.cwd(),
+    workDir: flags.workDir ? resolve(flags.workDir as string) : process.cwd(),
     pipeline,
     backend,
     permissionMode: flags.yolo ? 'auto' as const
@@ -165,14 +166,14 @@ function handleRuns(parsed: ParsedArgs): void {
     log(`  Prompt:   ${last.prompt}`);
     log(`  Status:   ${last.status}`);
     log(`  Started:  ${last.startedAt}`);
-    log(`  Duration: ${last.duration ? `${(last.duration / 1000).toFixed(1)}s` : 'n/a'}`);
+    log(`  Duration: ${last.duration ? formatDuration(last.duration) : 'n/a'}`);
     log(`  Cost:     $${last.estimatedCost.toFixed(4)}`);
     return;
   }
 
   log(`Runs in ${parsed.workDir}:\n`);
   for (const run of runs) {
-    const dur = run.duration ? `${(run.duration / 1000).toFixed(1)}s` : '...';
+    const dur = run.duration ? formatDuration(run.duration) : '...';
     const cost = `$${run.estimatedCost.toFixed(4)}`;
     log(`  ${run.id}  ${run.status.padEnd(10)}  ${dur.padStart(8)}  ${cost.padStart(8)}  ${run.prompt.slice(0, 60)}`);
   }

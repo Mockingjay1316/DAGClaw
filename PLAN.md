@@ -1055,6 +1055,7 @@ Features identified but explicitly deferred:
 | Heartbeat/cron scheduling | v0.3+ | Useful when managing large worker trees on long-running projects |
 | Distributed deployment | v0.4+ | Remote executors for compute-heavy subtasks, worker node management |
 | Community tool ecosystem | v0.4+ | Community-contributed stages, skill packs, integrations |
+| External task runner | v0.2+ | New `ExternalRun` stage type for long-running shell commands (compile, render, benchmark) outside Claude CLI. Configurable timeout per stage, streaming stdout/stderr capture to log files, Verify stage references external run output for validation. |
 
 ---
 
