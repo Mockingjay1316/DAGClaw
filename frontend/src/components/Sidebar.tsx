@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 import type { TaskStatus } from '../types.ts';
 import { CreateTaskForm } from './CreateTaskForm.tsx';
+import { useWebSocket } from '../hooks/useWebSocket.ts';
 
 const statusColor: Record<TaskStatus, string> = {
   completed: 'bg-green-500',
@@ -22,6 +23,8 @@ export function Sidebar() {
   const selectedRootId = useOrchestratorStore((s) => s.selectedRootId);
   const setRootTasks = useOrchestratorStore((s) => s.setRootTasks);
   const selectRoot = useOrchestratorStore((s) => s.selectRoot);
+  const { subscribe } = useWebSocket();
+  const subscribedRef = useRef(new Set<string>());
 
   const [showCreate, setShowCreate] = useState(false);
 
@@ -31,9 +34,27 @@ export function Sidebar() {
         if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
         return res.json();
       })
-      .then((tasks) => setRootTasks(tasks))
+      .then((tasks) => {
+        setRootTasks(tasks);
+        // Subscribe to WS events for all running tasks
+        const runningIds = tasks
+          .filter((t: { status: string }) => t.status === 'running' || t.status === 'pending')
+          .map((t: { id: string }) => t.id);
+        if (runningIds.length > 0) {
+          subscribe(runningIds);
+          runningIds.forEach((id: string) => subscribedRef.current.add(id));
+        }
+      })
       .catch((err) => console.error('Failed to load tasks:', err));
-  }, [setRootTasks]);
+  }, [setRootTasks, subscribe]);
+
+  function handleSelectRoot(id: string) {
+    selectRoot(id);
+    if (!subscribedRef.current.has(id)) {
+      subscribe([id]);
+      subscribedRef.current.add(id);
+    }
+  }
 
   return (
     <>
@@ -54,7 +75,7 @@ export function Sidebar() {
           {rootTasks.map((task) => (
             <button
               key={task.id}
-              onClick={() => selectRoot(task.id)}
+              onClick={() => handleSelectRoot(task.id)}
               className={`w-full text-left px-3 py-2.5 border-b border-gray-800 flex items-center gap-2 transition-colors cursor-pointer ${
                 selectedRootId === task.id
                   ? 'bg-gray-700 text-white'

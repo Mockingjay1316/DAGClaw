@@ -47,8 +47,8 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         return;
       }
 
-      const id = await taskStore.createTask({ prompt, workDir, pipeline, autoApprove });
-      res.status(201).json({ id });
+      const id = await taskStore.createTask({ prompt, workDir: resolvedDir, pipeline, autoApprove });
+      res.status(201).json({ id, prompt, workDir: resolvedDir, status: 'running', runId: null });
     } catch (err) {
       console.error('[tasks] Error:', err);
       res.status(500).json({ error: 'Internal server error' });
@@ -65,6 +65,7 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         workDir: t.workDir,
         status: t.status,
         runId: t.runId,
+        error: t.error,
       }));
       res.status(200).json(summaries);
     } catch (err) {

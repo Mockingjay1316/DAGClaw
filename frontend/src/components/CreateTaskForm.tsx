@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
+import { useWebSocket } from '../hooks/useWebSocket.ts';
 
 interface CreateTaskFormProps {
   onClose: () => void;
@@ -8,6 +9,7 @@ interface CreateTaskFormProps {
 export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
   const addRootTask = useOrchestratorStore((s) => s.addRootTask);
   const selectRoot = useOrchestratorStore((s) => s.selectRoot);
+  const { subscribe } = useWebSocket();
 
   const [prompt, setPrompt] = useState('');
   const [workDir, setWorkDir] = useState('/');
@@ -43,6 +45,7 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
       const task = await res.json();
       addRootTask(task);
       selectRoot(task.id);
+      subscribe([task.id]);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

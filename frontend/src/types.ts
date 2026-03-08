@@ -15,6 +15,7 @@ export interface TaskSummary {
   workDir: string;
   status: TaskStatus;
   runId: string | null;
+  error?: string;
 }
 
 export interface TaskDetail extends TaskSummary {
@@ -91,6 +92,10 @@ export type WsMessage =
   | { type: 'subtask_output'; taskId: string; index: number; data: string }
   | { type: 'subtask_complete'; taskId: string; index: number; oneliner?: string; error?: string; elapsed?: number }
   | { type: 'approval_required'; taskId: string; message: string }
+  | { type: 'approval_resolved'; taskId: string; approved: boolean }
+  | { type: 'plan_ready'; taskId: string; plan: Plan }
+  | { type: 'task_error'; taskId: string; error: string }
+  | { type: 'task_complete'; taskId: string }
   | { type: 'verification_result'; taskId: string; result: VerificationResult }
   | { type: 'retry'; taskId: string; indices: number[] };
 

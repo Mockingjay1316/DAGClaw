@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { TaskOrchestrator, OrchestratorCallbacks } from '../../core/taskOrchestrator.ts';
-import type { CliOptions, DAGEvent, Plan, RunManifest, StageDefinition } from '../../core/types.ts';
+import type { CliOptions, DAGEvent, Plan, StageDefinition } from '../../core/types.ts';
 import { RunLogger } from '../../core/runLogger.ts';
 import { mergeStages } from '../../core/configLoader.ts';
 import { BUILTIN_STAGES } from '../../core/stageDefinitions.ts';
@@ -107,6 +107,9 @@ export class TaskStore {
       onWarning: (msg: string) => {
         this.wsServer?.broadcast(taskId, { type: 'node_status', taskId, message: '[warn] ' + msg });
       },
+      onPlanReady: (plan: Plan) => {
+        this.wsServer?.broadcast(taskId, { type: 'plan_ready', taskId, plan });
+      },
     };
 
     const stageRegistry = this.customStagesRef
@@ -127,10 +130,13 @@ export class TaskStore {
       (result) => {
         task.runId = result.runId;
         task.status = 'completed';
+        this.wsServer?.broadcast(taskId, { type: 'task_complete', taskId });
       },
       (err: unknown) => {
         task.status = 'failed';
         task.error = err instanceof Error ? err.message : String(err);
+        console.error(`[taskStore] Task ${taskId} failed:`, task.error);
+        this.wsServer?.broadcast(taskId, { type: 'task_error', taskId, error: task.error });
       },
     );
 
@@ -154,6 +160,7 @@ export class TaskStore {
     task.pendingApproval.resolve(true);
     task.pendingApproval = undefined;
     task.status = 'running';
+    this.wsServer?.broadcast(id, { type: 'approval_resolved', taskId: id, approved: true });
     return true;
   }
 
@@ -164,6 +171,7 @@ export class TaskStore {
     task.pendingApproval.resolve(false);
     task.pendingApproval = undefined;
     task.status = 'failed';
+    this.wsServer?.broadcast(id, { type: 'approval_resolved', taskId: id, approved: false });
     return true;
   }
 

@@ -55,10 +55,22 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   // Actions
   setRootTasks: (tasks) =>
-    set({ rootTasks: tasks }),
+    set((state) => {
+      const nodeMap = new Map(state.nodeMap);
+      for (const task of tasks) {
+        if (!nodeMap.has(task.id)) {
+          nodeMap.set(task.id, { ...task, hasPendingApproval: false });
+        }
+      }
+      return { rootTasks: tasks, nodeMap };
+    }),
 
   addRootTask: (task) =>
-    set((state) => ({ rootTasks: [...state.rootTasks, task] })),
+    set((state) => {
+      const nodeMap = new Map(state.nodeMap);
+      nodeMap.set(task.id, { ...task, hasPendingApproval: false });
+      return { rootTasks: [...state.rootTasks, task], nodeMap };
+    }),
 
   updateTaskStatus: (taskId, status) =>
     set((state) => {
@@ -122,7 +134,8 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
     switch (msg.type) {
       case 'node_status':
-        store.updateTaskStatus(msg.taskId, msg.message);
+        // Status log messages — don't change task status, just log for debugging
+        console.log(`[${msg.taskId}] ${msg.message}`);
         break;
 
       case 'stage_start':
@@ -170,6 +183,43 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           }
           return { nodeMap };
         });
+        break;
+
+      case 'approval_resolved':
+        store.updateTaskStatus(msg.taskId, msg.approved ? 'running' : 'failed');
+        set((state) => {
+          const nodeMap = new Map(state.nodeMap);
+          const existing = nodeMap.get(msg.taskId);
+          if (existing) {
+            nodeMap.set(msg.taskId, {
+              ...existing,
+              status: msg.approved ? 'running' : 'failed',
+              hasPendingApproval: false,
+              pendingApprovalMessage: undefined,
+            });
+          }
+          return { nodeMap };
+        });
+        break;
+
+      case 'plan_ready':
+        store.setPlan(msg.taskId, msg.plan);
+        break;
+
+      case 'task_error':
+        store.updateTaskStatus(msg.taskId, 'failed');
+        set((state) => {
+          const nodeMap = new Map(state.nodeMap);
+          const existing = nodeMap.get(msg.taskId);
+          if (existing) {
+            nodeMap.set(msg.taskId, { ...existing, status: 'failed', error: msg.error });
+          }
+          return { nodeMap };
+        });
+        break;
+
+      case 'task_complete':
+        store.updateTaskStatus(msg.taskId, 'completed');
         break;
 
       case 'verification_result':

@@ -110,6 +110,7 @@ export interface OrchestratorCallbacks {
   onDAGEvent?: (event: DAGEvent) => void;
   onStageStart?: (label: string) => void;
   onStageEnd?: () => void;
+  onPlanReady?: (plan: Plan) => void;
 }
 
 // --- TaskOrchestrator ---
@@ -187,6 +188,12 @@ export class TaskOrchestrator {
           await this.runDAG(runId, stage, state, subtasks);
         } else {
           await this.runOne(runId, stage, state);
+        }
+
+        // Notify listeners when plan is ready (before approval prompt)
+        if (state.plan && this.cb.onPlanReady) {
+          this.cb.onPlanReady(state.plan);
+          this.cb.onPlanReady = undefined; // fire once
         }
 
         if (stage.approvalRequired && !this.opts.autoApprove) {
