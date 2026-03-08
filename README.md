@@ -196,6 +196,28 @@ Subscribe to task events:
 
 The server pushes real-time events: `stage_start`, `stage_complete`, `subtask_start`, `subtask_complete`, `approval_required`, `node_status`.
 
+## Frontend (React UI)
+
+The React frontend connects to the backend via Vite's dev proxy. All API and WebSocket traffic goes through the proxy, so no CORS configuration is needed in dev mode.
+
+```bash
+# Install frontend dependencies (one-time)
+cd frontend && npm install
+
+# Start the full stack (two terminals)
+# Terminal 1: Backend
+node --import tsx backend/src/index.ts
+
+# Terminal 2: Frontend dev server
+cd frontend && npm run dev
+```
+
+The frontend is accessible at `http://localhost:5173`. For **LAN access** from another machine (e.g., a desktop on the same network):
+
+1. The Vite dev server binds to `0.0.0.0` by default, so it's already LAN-accessible
+2. Find the server's LAN IP: `hostname -I | awk '{print $1}'`
+3. Open `http://<server-ip>:5173` in Chrome on the other machine
+
 ## Development
 
 ```bash
