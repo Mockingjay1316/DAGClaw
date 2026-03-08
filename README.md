@@ -284,7 +284,7 @@ E2E test scripts in `test_scripts/` cover core flows: dependency resolution, ret
 | **2** | Custom stages, pipeline-aware planning, per-subtask stage routing | Done |
 | **2.5** | Live DAG display, tree-format cost summary, stage ticker | Done |
 | **3** | Express + WebSocket backend server | Done |
-| **4** | React frontend with xterm.js terminals | Not started |
+| **4** | React frontend with xterm.js terminals | Done |
 | **5** | Polish, error handling, responsive UI | Not started |
 
 See [PLAN.md](PLAN.md) for full details on each phase and the future roadmap.

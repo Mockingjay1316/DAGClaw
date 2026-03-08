@@ -704,7 +704,7 @@ npx claw --workdir . \
 | Custom stages + pipeline-aware planning | Phase 2 | ✅ Done |
 | Live DAG display + cost summary | Phase 2.5 | ✅ Done |
 | Express + WebSocket backend | Built by claw (Phase 3) | ✅ Done |
-| React frontend | Built by claw (Phase 4) | Not started |
+| React frontend | Built by claw (Phase 4) | ✅ Done |
 | Polish & integration | Built by claw (Phase 5) | Not started |
 
 ## Key Design Decisions
@@ -1065,6 +1065,7 @@ Features identified but explicitly deferred:
 | Heartbeat/cron scheduling | v0.3+ | Useful when managing large worker trees on long-running projects |
 | Distributed deployment | v0.4+ | Remote executors for compute-heavy subtasks, worker node management |
 | Community tool ecosystem | v0.4+ | Community-contributed stages, presets, integrations |
+| Per-worker model selection | v0.2+ | `--model` flag for global default, `--dag-model` for DAG subtask override. Add `model?: string` to `RunClaudeOptions`, `StageRunnerConfig`, `CliOptions`. Thread through `claudeRunner.ts` as `--model` arg to `claude` CLI. Per-stage model in `dagclaw.config.json`. Enables Opus for Plan/Verify + Sonnet for Execute workers to reduce cost. ~40 lines across types/cli/runner. |
 
 ---
 
