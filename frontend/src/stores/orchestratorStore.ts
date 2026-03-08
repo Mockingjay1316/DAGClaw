@@ -141,7 +141,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       case 'stage_start':
         set((state) => {
           const stageInfo = new Map(state.stageInfo);
-          stageInfo.set(msg.taskId, { currentStage: msg.label, status: 'running' });
+          stageInfo.set(msg.taskId, { currentStage: msg.stageName, status: 'running' });
           return { stageInfo };
         });
         break;

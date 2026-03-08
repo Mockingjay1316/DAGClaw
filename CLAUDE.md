@@ -42,13 +42,22 @@ node --import tsx bin/dagclaw.js runs --last
 
 # Start backend server
 node --import tsx backend/src/index.ts
+
+# Start full stack (backend + frontend)
+bash scripts/start_server.sh
+
+# Stop full stack
+bash scripts/stop_server.sh
+
+# Start frontend dev server (manually)
+cd frontend && npm install && npm run dev
 ```
 
 Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm/nvm.sh` first.
 
 ## Architecture
 
-**Project structure**: `core/` (shared orchestration engine), `cli/` (CLI entry point + terminal display), `backend/` (Express + WebSocket server), `docs/` (architecture docs, competitive analysis).
+**Project structure**: `core/` (shared orchestration engine), `cli/` (CLI entry point + terminal display), `backend/` (Express + WebSocket server), `frontend/` (React + Vite + xterm.js UI), `scripts/` (server start/stop), `docs/` (architecture docs, competitive analysis).
 
 **Pipeline**: Plan (mandatory) → DAG (heterogeneous execution) → Post-stages (mandatory, e.g., Verify). Each stage is a `StageDefinition` with `contextBuilder`, `resultHandler`, and `formatStatus`. The orchestrator is stage-agnostic — all stage-specific logic lives in `core/stageDefinitions.ts`.
 

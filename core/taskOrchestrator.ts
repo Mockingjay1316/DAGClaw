@@ -108,7 +108,7 @@ export interface OrchestratorCallbacks {
   onStatus?: (message: string) => void;
   onWarning?: (message: string) => void;
   onDAGEvent?: (event: DAGEvent) => void;
-  onStageStart?: (label: string) => void;
+  onStageStart?: (label: string, stageName?: string) => void;
   onStageEnd?: () => void;
   onPlanReady?: (plan: Plan) => void;
 }
@@ -254,7 +254,7 @@ export class TaskOrchestrator {
       // DAG display handles subtask rendering
     } else if (!subtask && this.cb.onStageStart) {
       // Standalone stage: start live ticker
-      this.cb.onStageStart(statusLabel);
+      this.cb.onStageStart(statusLabel, stage.name);
     } else {
       this.status(statusLabel);
     }

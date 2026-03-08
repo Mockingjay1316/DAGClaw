@@ -3,6 +3,7 @@ import { PlanView } from './PlanView.tsx';
 import { ApprovalBanner } from './ApprovalBanner.tsx';
 import { ExecutionView } from './ExecutionView.tsx';
 import { VerifyView } from './VerifyView.tsx';
+import { StageIndicator } from './StageIndicator.tsx';
 
 export function DetailPanel() {
   const selectedNodeId = useOrchestratorStore((state) => state.selectedNodeId);
@@ -29,6 +30,7 @@ export function DetailPanel() {
 
   const hasPendingApproval = task?.hasPendingApproval ?? false;
   const currentStage = stageInfo?.currentStage ?? '';
+  const taskStatus = task?.status ?? 'pending';
 
   function renderContent() {
     // Plan stage or pending approval → PlanView
@@ -49,7 +51,6 @@ export function DetailPanel() {
     // Default: task summary
     return (
       <div className="bg-gray-800 rounded p-4 space-y-3">
-        <h2 className="text-lg font-semibold text-white">Task Summary</h2>
         {task ? (
           <>
             <div>
@@ -60,16 +61,6 @@ export function DetailPanel() {
               <span className="text-gray-400 text-sm">Working Directory:</span>
               <p className="text-white text-sm mt-1 font-mono">{task.workDir}</p>
             </div>
-            <div>
-              <span className="text-gray-400 text-sm">Status:</span>
-              <span className="ml-2 text-sm text-white capitalize">{task.status}</span>
-            </div>
-            {task.error && (
-              <div>
-                <span className="text-gray-400 text-sm">Error:</span>
-                <p className="text-red-400 text-sm mt-1">{task.error}</p>
-              </div>
-            )}
             {plan && (
               <div className="pt-2 border-t border-gray-700">
                 <PlanView taskId={selectedNodeId!} />
@@ -84,8 +75,43 @@ export function DetailPanel() {
   }
 
   return (
-    <div className="flex-1 bg-gray-900 overflow-y-auto p-4">
-      {renderContent()}
+    <div className="flex-1 bg-gray-900 overflow-y-auto flex flex-col">
+      {/* Header bar with status and stage indicator */}
+      <div className="px-4 py-3 border-b border-gray-800 shrink-0">
+        <div className="flex items-center gap-3">
+          <span className={`text-sm font-medium capitalize ${
+            taskStatus === 'completed' ? 'text-green-400' :
+            taskStatus === 'failed' ? 'text-red-400' :
+            taskStatus === 'running' ? 'text-blue-400' :
+            taskStatus === 'awaiting_approval' ? 'text-yellow-400' :
+            'text-gray-400'
+          }`}>
+            {taskStatus === 'awaiting_approval' ? 'Awaiting Approval' : taskStatus}
+          </span>
+          {stageInfo && (
+            <div className="flex-1 max-w-xs">
+              <StageIndicator
+                currentStage={stageInfo.currentStage}
+                status={taskStatus === 'completed' ? 'completed' : taskStatus === 'failed' ? 'failed' : stageInfo.status}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Error banner */}
+      {task?.error && (
+        <div className="mx-4 mt-3 p-3 bg-red-900/40 border border-red-700 rounded text-sm text-red-300">
+          <span className="font-medium text-red-200">Error:</span> {task.error}
+        </div>
+      )}
+
+      {/* Main content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {renderContent()}
+      </div>
+
+      {/* Approval banner */}
       {hasPendingApproval && task?.pendingApprovalMessage && (
         <ApprovalBanner
           taskId={selectedNodeId}

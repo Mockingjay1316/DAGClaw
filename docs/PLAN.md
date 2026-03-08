@@ -705,7 +705,7 @@ npx claw --workdir . \
 | Live DAG display + cost summary | Phase 2.5 | ✅ Done |
 | Express + WebSocket backend | Built by claw (Phase 3) | ✅ Done |
 | React frontend | Built by claw (Phase 4) | ✅ Done |
-| Polish & integration | Built by claw (Phase 5) | Not started |
+| Polish & integration | Phase 5 | ✅ Done |
 
 ## Key Design Decisions
 

@@ -91,8 +91,8 @@ export class TaskStore {
         const { type: _eventType, ...eventData } = event;
         this.wsServer?.broadcast(taskId, { type: mapDAGEventType(event), taskId, ...eventData });
       },
-      onStageStart: (label: string) => {
-        this.wsServer?.broadcast(taskId, { type: 'stage_start', taskId, label });
+      onStageStart: (label: string, stageName?: string) => {
+        this.wsServer?.broadcast(taskId, { type: 'stage_start', taskId, label, stageName: stageName ?? label });
       },
       onStageEnd: () => {
         this.wsServer?.broadcast(taskId, { type: 'stage_complete', taskId });

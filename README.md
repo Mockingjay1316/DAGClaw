@@ -204,10 +204,15 @@ The React frontend connects to the backend via Vite's dev proxy. All API and Web
 # Install frontend dependencies (one-time)
 cd frontend && npm install
 
-# Start the full stack (two terminals)
+# Start the full stack (recommended — runs both backend + frontend)
+bash scripts/start_server.sh
+
+# Stop both services
+bash scripts/stop_server.sh
+
+# Or start manually in two terminals:
 # Terminal 1: Backend
 node --import tsx backend/src/index.ts
-
 # Terminal 2: Frontend dev server
 cd frontend && npm run dev
 ```
@@ -217,6 +222,8 @@ The frontend is accessible at `http://localhost:5173`. For **LAN access** from a
 1. The Vite dev server binds to `0.0.0.0` by default, so it's already LAN-accessible
 2. Find the server's LAN IP: `hostname -I | awk '{print $1}'`
 3. Open `http://<server-ip>:5173` in Chrome on the other machine
+
+Server logs are written to `.dagclaw/pids/backend.log` and `.dagclaw/pids/frontend.log`.
 
 ## Development
 
@@ -293,6 +300,10 @@ CLI orchestrator with plan decomposition, parallel DAG execution, verification w
 
 Express + WebSocket backend with REST API for task/stage management, real-time WebSocket events, and security hardening (API key auth with timing-safe comparison, rate limiting, path traversal prevention, CORS restriction, WebSocket resource limits, body size cap, generic error responses, security headers). 60 backend tests.
 
+**Phase 5: Polish & Integration — Complete**
+
+Frontend-backend integration fixes: WebSocket subscriptions, plan delivery, approval flow, stage indicator, error display, reconnect with re-subscribe, LAN access, server start/stop scripts.
+
 **E2E Validation — Continuous**
 
 E2E test scripts in `test_scripts/` cover core flows: dependency resolution, retry logic, cascade-skip, concurrency control, memory injection, recursive decomposition, and natural language planning.
@@ -307,7 +318,7 @@ E2E test scripts in `test_scripts/` cover core flows: dependency resolution, ret
 | **2.5** | Live DAG display, tree-format cost summary, stage ticker | Done |
 | **3** | Express + WebSocket backend server | Done |
 | **4** | React frontend with xterm.js terminals | Done |
-| **5** | Polish, error handling, responsive UI | Not started |
+| **5** | Polish: WS integration, stage indicator, error display, reconnect | Done |
 
 See [PLAN.md](PLAN.md) for full details on each phase and the future roadmap.
 

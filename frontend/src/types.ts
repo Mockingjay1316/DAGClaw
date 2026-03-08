@@ -86,7 +86,7 @@ export type WsMessage =
   | { type: 'tree_snapshot'; taskId: string; subtasks: { index: number; description: string; dependencies: number[]; stage: string }[] }
   | { type: 'node_created'; taskId: string; nodeId: string }
   | { type: 'node_status'; taskId: string; message: string }
-  | { type: 'stage_start'; taskId: string; label: string }
+  | { type: 'stage_start'; taskId: string; label: string; stageName: string }
   | { type: 'stage_complete'; taskId: string }
   | { type: 'subtask_start'; taskId: string; index: number }
   | { type: 'subtask_output'; taskId: string; index: number; data: string }

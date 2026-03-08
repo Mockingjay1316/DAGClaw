@@ -15,30 +15,32 @@ function getSegmentColor(
   const stageIdx = pipeline.indexOf(stage);
   const currentIdx = pipeline.indexOf(currentStage);
 
+  // Task-level terminal states: all stages done
+  if (status === 'completed') return 'bg-green-500';
+  if (status === 'failed') {
+    if (currentIdx < 0) return 'bg-red-500/50';
+    if (stageIdx < currentIdx) return 'bg-green-500';
+    if (stageIdx === currentIdx) return 'bg-red-500';
+    return 'bg-gray-600';
+  }
+
   if (stageIdx < 0 || currentIdx < 0) return 'bg-gray-600';
 
   if (stageIdx < currentIdx) {
-    // Past stages are completed
     return 'bg-green-500';
   }
 
   if (stageIdx === currentIdx) {
-    // Current stage — color by status
     switch (status) {
       case 'running':
         return 'bg-blue-500 animate-pulse';
-      case 'completed':
-        return 'bg-green-500';
-      case 'failed':
-        return 'bg-red-500';
       case 'awaiting_approval':
-        return 'bg-yellow-500';
+        return 'bg-yellow-500 animate-pulse';
       default:
         return 'bg-gray-600';
     }
   }
 
-  // Future stages are pending
   return 'bg-gray-600';
 }
 
@@ -58,7 +60,9 @@ export function StageIndicator({
           />
         ))}
       </div>
-      <span className="text-xs text-gray-400">{currentStage}</span>
+      <span className="text-xs text-gray-400">
+        {status === 'completed' ? 'Completed' : status === 'failed' ? 'Failed' : currentStage}
+      </span>
     </div>
   );
 }

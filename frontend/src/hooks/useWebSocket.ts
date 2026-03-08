@@ -29,6 +29,7 @@ let connected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
+const activeSubscriptions = new Set<string>();
 
 // External store for `connected` state (useSyncExternalStore pattern)
 const connectedListeners = new Set<() => void>();
@@ -83,6 +84,11 @@ function connect() {
       undefined;
     if (apiKey) {
       ws!.send(JSON.stringify({ type: 'auth', token: apiKey }));
+    }
+
+    // Re-subscribe to all active subscriptions after reconnect
+    if (activeSubscriptions.size > 0) {
+      send({ type: 'subscribe', nodeIds: [...activeSubscriptions] });
     }
   };
 
@@ -140,10 +146,12 @@ function disconnect() {
 // --- Exported action functions ---
 
 function subscribe(nodeIds: string[]) {
+  for (const id of nodeIds) activeSubscriptions.add(id);
   send({ type: 'subscribe', nodeIds });
 }
 
 function unsubscribe(nodeIds: string[]) {
+  for (const id of nodeIds) activeSubscriptions.delete(id);
   send({ type: 'unsubscribe', nodeIds });
 }
 
