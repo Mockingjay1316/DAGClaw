@@ -288,7 +288,7 @@ backend/                       Express + WebSocket server
 └── __tests__/                 Backend tests (60 tests)
 ```
 
-See [HUMAN.md](HUMAN.md) for a detailed developer guide, [docs/DATAFLOW.md](docs/DATAFLOW.md) for call graphs and data flow diagrams, and [docs/PLAN.md](docs/PLAN.md) for the full system architecture and roadmap.
+See [HUMAN.md](HUMAN.md) for a detailed developer guide, [docs/PLAN.md](docs/PLAN.md) for the full system architecture and roadmap, [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for core design beliefs, [docs/DATAFLOW.md](docs/DATAFLOW.md) for call graphs and data flow diagrams.
 
 ## Current Status
 

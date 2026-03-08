@@ -102,5 +102,6 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 ## Documentation
 
 - `docs/PLAN.md` — Full system architecture and phased implementation plan
+- `docs/PHILOSOPHY.md` — Core design beliefs and guiding principles
 - `docs/DATAFLOW.md` — Call graph and data flow documentation
 - `docs/COMPETITIVE.md` — Competitive analysis (DeerFlow, OpenClaw/ClawFlow, Lobster)
