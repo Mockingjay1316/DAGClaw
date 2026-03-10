@@ -31,18 +31,23 @@
            │ runClaudeCli │  │ BUILTIN_STAGES   │  │ initRun()    │  │ readAll()      │
            │ buildStage   │  │ Plan/Execute/    │  │ logPrompt()  │  │ buildContext   │
            │   Prompt()   │  │ Verify configs   │  │ writeVerify()│  │   Block()      │
-           └──────┬───────┘  └──────────────────┘  └──────────────┘  └────────────────┘
-                  │                                        │
-                  ▼                                        ▼
-        ┌─────────────────┐                    ┌─────────────────────┐
-        │ claude -p (CLI) │                    │ .dagclaw/              │
-        │ subprocess      │                    │ ├── runs/<id>/      │
-        └─────────────────┘                    │ ├── tmp/            │
-                                               │ ├── memory/         │
-           ┌───────────────────┐               │ └── lock            │
-           │ dependencyResolver│               └─────────────────────┘
-           │ DependencyResolver│
-           │ detectCircularDeps│
+           │ extractText  │  │                  │  │ writeRun     │  │ writeFile()    │
+           │  FromStream  │  │                  │  │   Memory()   │  │ updateIndex()  │
+           │  Json()      │  │                  │  │              │  │                │
+           └──────┬───────┘  └──────────────────┘  └──────┬───────┘  └───────┬────────┘
+                  │                                       │                  │
+                  ▼                                       │                  │
+        ┌─────────────────┐  ┌──────────────────┐        │                  │
+        │ claude -p (CLI) │  │ memoryDistiller  │←───────┴──────────────────┘
+        │ subprocess      │  │ distillMemory()  │  (uses logger + memoryManager
+        └─────────────────┘  └──────────────────┘   after run completion)
+                                               ┌─────────────────────┐
+                                               │ .dagclaw/              │
+                                               │ ├── runs/<id>/      │
+           ┌───────────────────┐               │ ├── tmp/            │
+           │ dependencyResolver│               │ ├── memory/         │
+           │ DependencyResolver│               │ └── lock            │
+           │ detectCircularDeps│               └─────────────────────┘
            └───────────────────┘
            ┌──────────────┐
            │ taskManager  │
@@ -119,7 +124,13 @@ TaskOrchestrator.run()
 │
 ├─ 9. logger.updateManifestStatus(runId, "completed" | "failed")
 ├─ 10. IF !noSummary: printCostSummary(runId)
-└─ 11. IF !isChild: releaseLock(workDir)
+├─ 11. IF plan.worthDistilling && !noMemory:
+│       distillMemory(runId, state, logger, memoryManager, opts)
+│       → runs Claude distiller, extracts clean text from NDJSON
+│       → writes to per-run memory.md + project-level <runId>.md
+│       → regenerates .dagclaw/memory/index.md
+│       (non-fatal: errors logged but don't fail the pipeline)
+└─ 12. IF !isChild: releaseLock(workDir)
 ```
 
 ## `runOne()` — Single Execution Primitive
@@ -414,6 +425,386 @@ Agents write JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`). The orc
 }
 ```
 
+## Memory Management — Complete Dataflow
+
+Memory is DAGClaw's cross-run learning system. It reads distilled knowledge from past runs into
+every stage prompt, and writes new knowledge after successful runs. Two tiers: **project-level**
+(shared across runs) and **per-run** (audit trail per execution).
+
+### Architecture Overview
+
+```
+                          ┌─────────────────────────────────────────────┐
+                          │           .dagclaw/memory/                  │
+                          │  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+                          │  │ index.md │  │ runA.md  │  │ runB.md  │  │
+                          │  │ (table)  │  │ (detail) │  │ (detail) │  │
+                          │  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
+                          │       │             │             │        │
+                          └───────┼─────────────┼─────────────┼────────┘
+                                  │             │             │
+                    ┌─────────────┴─────────────┴─────────────┘
+                    │ readAll() → sortFilesIndexFirst()
+                    │ → concatenate with ### headers
+                    ▼
+            ┌───────────────┐     buildContextBlock()     ┌──────────────────┐
+            │ MemoryManager │ ──────────────────────────→ │ PipelineState    │
+            │               │  "--- Project Memory ---"   │ .memoryContext   │
+            └───────┬───────┘  "### index.md\n..."        └────────┬─────────┘
+                    │          "### <runId>.md\n..."                │
+                    │          "--- End Memory ---"                 │
+                    │                                               │
+                    │                     ┌─────────────────────────┘
+                    │                     │ contextBuilder() per stage
+                    │                     │ → {{memoryContext}} interpolation
+                    │                     ▼
+                    │              ┌──────────────┐
+                    │              │ Every Claude  │  (Plan, Execute, Verify)
+                    │              │ invocation    │  receives memory in
+                    │              │ system prompt │  its prompt context
+                    │              └──────────────┘
+                    │
+                    │  After run completes (if worthDistilling && !noMemory):
+                    │
+           ┌────────┴─────────┐
+           │ distillMemory()  │
+           │                  │
+           │ 1. Build prompt  │──→ buildDistillationPrompt(state)
+           │ 2. Run Claude    │──→ runClaudeCli({model: distillModel ?? 'sonnet'})
+           │ 3. Extract text  │──→ extractTextFromStreamJson(rawOutput)
+           │ 4. Strip fences  │──→ stripMarkdownFence(text)
+           │ 5. Store 3 ways  │──→ see below
+           │ 6. Update index  │──→ memoryManager.updateIndex()
+           └──────────────────┘
+                    │
+        ┌───────────┼────────────────────┐
+        ▼           ▼                    ▼
+  Per-run raw    Per-run clean     Project-level
+  ground truth   memory            shared memory
+  ┌──────────┐  ┌──────────┐     ┌──────────────┐
+  │memory-   │  │memory.md │     │<runId>.md    │
+  │distill-  │  │(clean)   │     │(clean)       │
+  │ation.log │  └──────────┘     └──────────────┘
+  │(NDJSON)  │
+  └──────────┘
+```
+
+### Reading: Memory Injection into Prompts
+
+Memory is read once at pipeline start and injected into every stage's prompt context.
+
+```
+TaskOrchestrator.run()
+│
+├─ 1. Check !opts.noMemory                      (--no-memory flag disables)
+│
+├─ 2. memory.buildContextBlock()                 (memoryManager.ts:109)
+│     │
+│     ├─ readAll()                               (memoryManager.ts:21)
+│     │   ├─ listFiles()                         → readdirSync, filter *.md, sort
+│     │   ├─ sortFilesIndexFirst(files)          → ['index.md', ...rest]
+│     │   └─ FOR each file:
+│     │       content = readFileSync(file)
+│     │       parts.push("### {filename}\n{content}")
+│     │   → returns concatenated string
+│     │
+│     ├─ Wrap with delimiters:
+│     │   "--- Project Memory ---\n{content}\n--- End Memory ---"
+│     │
+│     └─ Optional maxChars budget truncation
+│        → returns context block string
+│
+├─ 3. state.memoryContext = contextBlock          (immutable for entire pipeline)
+│
+└─ 4. Every stage receives memoryContext via contextBuilder:
+      │
+      ├─ Plan contextBuilder:
+      │   returns { memoryContext: state.memoryContext, ... }
+      │   → system prompt has: {{memoryContext}}
+      │
+      ├─ Execute contextBuilder:
+      │   returns { memoryContext: state.memoryContext, ... }
+      │   → system prompt has: {{memoryContext}}
+      │
+      └─ Verify contextBuilder:
+          (no memoryContext — Verify focuses on current run only)
+
+      promptBuilder.buildStagePrompt(template, context)
+      → replaces {{memoryContext}} with actual content
+      → assembled prompt sent to Claude CLI
+```
+
+**Key design choice**: Memory context is set once at pipeline init and never mutated. All stages
+in a single run see the same memory snapshot, preventing mid-run inconsistency.
+
+### Writing: Memory Distillation Pipeline
+
+After a successful run, the distillation pipeline synthesizes reusable insights.
+
+```
+TaskOrchestrator.run() — post-completion
+│
+├─ Check: state.plan?.worthDistilling && !opts.noMemory
+│   │
+│   │  worthDistilling is a boolean set by the Plan stage.
+│   │  The planner decides whether the task is novel enough
+│   │  to produce reusable knowledge (trivial tasks → false).
+│   │
+│   └─ IF false: skip distillation entirely
+│
+└─ distillMemory(runId, state, logger, memoryManager, opts)
+      │                                           (memoryDistiller.ts:64)
+      │
+      ├─ 1. buildDistillationPrompt(state)        (memoryDistiller.ts:27)
+      │     │
+      │     │  Assembles a summary of what happened:
+      │     │  ┌────────────────────────────────────────────┐
+      │     │  │ ## Plan Summary                            │
+      │     │  │ Build a REST API with 3 endpoints...       │
+      │     │  │                                            │
+      │     │  │ ## Subtasks                                │
+      │     │  │ - [0] Create routes — completed: Added...  │
+      │     │  │ - [1] Add tests — completed: Wrote 12...   │
+      │     │  │ - [2] Wire middleware — no snapshot         │
+      │     │  │                                            │
+      │     │  │ ## Verification                            │
+      │     │  │ Overall: PASSED                            │
+      │     │  │ All integration checks clean.              │
+      │     │  └────────────────────────────────────────────┘
+      │     │
+      │     │  Data sources:
+      │     │  - state.plan.summary
+      │     │  - state.plan.subtasks[].description
+      │     │  - state.subtaskSnapshots.get(index)?.summary
+      │     │  - state.verification.overallPass
+      │     │  - state.verification.integrationResult?.summary
+      │     │
+      │     → returns prompt string
+      │
+      ├─ 2. runClaudeCli({                        (claudeRunner.ts)
+      │       prompt,
+      │       systemPrompt: DISTILLATION_SYSTEM_PROMPT,
+      │       workDir: opts.workDir,
+      │       allowedTools: [],                    ← no tools, pure reasoning
+      │       model: opts.distillModel ?? 'sonnet' ← configurable via --distill-model
+      │     })
+      │     │
+      │     │  DISTILLATION_SYSTEM_PROMPT instructs structured output:
+      │     │  ┌──────────────────────────────────────────────────────┐
+      │     │  │ # <Human-readable title>                            │
+      │     │  │ > <One-liner for index retrieval, max 150 chars>    │
+      │     │  │ ## Summary                                          │
+      │     │  │ <100-200 word narrative paragraph>                  │
+      │     │  │ ## Key Patterns                                     │
+      │     │  │ <Specific reusable patterns with code snippets>     │
+      │     │  │ ## Gotchas                                          │
+      │     │  │ <Problems and fixes>                                │
+      │     │  │ ## Reusable Insights                                │
+      │     │  │ <Numbered actionable takeaways>                     │
+      │     │  └──────────────────────────────────────────────────────┘
+      │     │
+      │     → returns RunClaudeResult { rawOutput (NDJSON stream) }
+      │
+      ├─ 3. NDJSON Extraction Pipeline            (claudeRunner.ts:228)
+      │     │
+      │     │  extractTextFromStreamJson(result.rawOutput)
+      │     │  │
+      │     │  │  Claude CLI outputs NDJSON (newline-delimited JSON):
+      │     │  │  ┌─────────────────────────────────────────────────┐
+      │     │  │  │ {"type":"system","subtype":"init",...}          │
+      │     │  │  │ {"type":"assistant","message":{"content":[...]}}│
+      │     │  │  │ {"type":"assistant","message":{"content":[...]}}│
+      │     │  │  │ {"type":"rate_limit_event",...}                 │
+      │     │  │  │ {"type":"result","result":"# Title\n\n..."}    │
+      │     │  │  └─────────────────────────────────────────────────┘
+      │     │  │
+      │     │  │  Extraction priority:
+      │     │  │  1. type='result' with string result field  → use result
+      │     │  │  2. type='assistant' text content items     → join all
+      │     │  │  3. Fallback                                → raw output
+      │     │  │
+      │     │  → returns extracted text (may still have markdown fences)
+      │     │
+      │     │  stripMarkdownFence(text)
+      │     │  │  Removes wrapping ```markdown ... ``` or ```md ... ```
+      │     │  │  Regex: /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/
+      │     │  │
+      │     │  → returns clean markdown text
+      │
+      ├─ 4. Three-Way Storage
+      │     │
+      │     ├─ a. Raw NDJSON → per-run ground truth
+      │     │     logger.appendStageLog(runId, 'memory-distillation', rawOutput)
+      │     │     → .dagclaw/runs/<runId>/memory-distillation.log
+      │     │     Purpose: audit trail, debugging garbled output
+      │     │
+      │     ├─ b. Clean text → per-run memory
+      │     │     logger.writeRunMemory(runId, cleanText)
+      │     │     → .dagclaw/runs/<runId>/memory.md
+      │     │     Purpose: per-run snapshot of distilled knowledge
+      │     │
+      │     └─ c. Clean text → project-level shared memory
+      │           filename = runId + '.md'
+      │           memoryManager.writeFile(filename, cleanText)
+      │           → .dagclaw/memory/<runId>.md
+      │           Purpose: cross-run shared knowledge base, browsable by timestamp
+      │           Content: structured format from distiller (title, one-liner, summary, details)
+      │
+      ├─ 5. Regenerate progressive-disclosure index
+      │     memoryManager.updateIndex()            (memoryManager.ts)
+      │     │
+      │     │  ├─ readSummaries()
+      │     │  │   ├─ listFiles() excluding 'index.md'
+      │     │  │   └─ FOR each file: parseMemoryFile(content)
+      │     │  │       → extracts: title (H1), oneliner (> blockquote), summary (## Summary)
+      │     │  │       → fallback: first non-heading line if no blockquote
+      │     │  │
+      │     │  └─ Writes index.md:
+      │     │     ┌──────────────────────────────────────────────────────────────────┐
+      │     │     │ # DAGClaw Project Memory Index                                  │
+      │     │     │                                                                 │
+      │     │     │ | Run | Title | Summary |                                       │
+      │     │     │ |-----|-------|---------|                                        │
+      │     │     │ | [<runId>.md](...) | Human Title | One-liner for retrieval... | │
+      │     │     └──────────────────────────────────────────────────────────────────┘
+      │     │
+      │     → .dagclaw/memory/index.md (overwritten)
+      │
+      └─ 6. Error handling: non-fatal
+            catch (err) → logger.warn() if available
+            Pipeline completion is never blocked by distillation failure.
+```
+
+### Structured Memory File Format
+
+Each memory file follows a structured format for both human readability and machine retrieval:
+
+```
+.dagclaw/memory/{runId}.md
+
+┌──────────────────────────────────────────────────────────────────┐
+│ # Human-Readable Title                                          │  ← parseMemoryFile().title
+│                                                                  │
+│ > One-line summary for index retrieval, max 150 chars.          │  ← parseMemoryFile().oneliner
+│                                                                  │
+│ ## Summary                                                       │  ← parseMemoryFile().summary
+│                                                                  │
+│ 100-200 word narrative paragraph covering what was done,         │
+│ approach taken, key decisions, and outcome.                      │
+│                                                                  │
+│ ## Key Patterns                                                  │  ← detailed content
+│ ### Pattern A                                                    │
+│ Specific reusable pattern with code snippets.                    │
+│                                                                  │
+│ ## Gotchas                                                       │
+│ Problems encountered and fixes.                                  │
+│                                                                  │
+│ ## Reusable Insights                                             │
+│ 1. Actionable takeaway A.                                        │
+│ 2. Actionable takeaway B.                                        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Why this structure**: Designed for two-phase retrieval (v0.2 context management):
+
+```
+Phase 1: Index scan                 Phase 2: Summary scan             Phase 3: Full read
+─────────────────                   ──────────────────                 ───────────────
+index.md table                      readSummaries() →                 readFile(name)
+(title + one-liner per run)         MemoryEntry[] with                → full markdown
+                                    title, oneliner, summary
+Select ~100 most relevant    →      Narrow to ~10-20 relevant    →    Compose detailed
+by matching one-liners               by reading 100-200 word           context from
+against current task prompt           summaries + run prompts           selected files
+```
+
+The `readSummaries()` method (memoryManager.ts) returns `MemoryEntry[]`:
+```ts
+interface MemoryEntry {
+  filename: string;   // e.g. "2026-03-10T02-33-37_838c3e07.md"
+  title: string;      // e.g. "Backend REST Endpoints and WebSocket Usage Broadcasts"
+  oneliner: string;   // e.g. "Added GET /api/runs endpoints using Express router factory pattern."
+  summary: string;    // 100-200 word narrative paragraph
+}
+```
+
+### CLI Configuration
+
+```
+--no-memory          Disable memory reading AND writing (opts.noMemory)
+--distill-model X    Model for distillation (opts.distillModel, default: 'sonnet')
+                     Decoupled from main pipeline model — distillation is
+                     pure reasoning with no tool use, so a smaller model suffices.
+```
+
+### Memory File System Layout
+
+```
+.dagclaw/
+├── memory/                                      ← PROJECT-LEVEL (MemoryManager)
+│   ├── index.md                                 ← Auto-generated by updateIndex()
+│   │     Three-column table: Run | Title | Summary (one-liner)
+│   │     Always read FIRST via sortFilesIndexFirst()
+│   │
+│   ├── 2026-03-10T02-22-18_641f0bd9.md          ← Run ID as filename
+│   │     # Added Model Selection to Memory Distiller
+│   │     > Added --distill-model CLI flag threading...
+│   │     ## Summary / ## Key Patterns / ## Gotchas / ## Reusable Insights
+│   │
+│   ├── 2026-03-10T02-33-37_838c3e07.md
+│   │     # Backend REST Endpoints and WebSocket Usage Broadcasts
+│   │     > Added GET /api/runs endpoints using Express...
+│   │
+│   └── 2026-03-10T02-58-04_59bc30a9.md
+│         # Fixed Memory Distillation Pipeline
+│         > Fixed garbled memory caused by raw NDJSON...
+│
+└── runs/
+    └── <runId>/                                 ← PER-RUN (RunLogger)
+        ├── memory.md                            ← Clean distilled text
+        │     Written by logger.writeRunMemory()
+        │     Same content as the project-level <runId>.md file
+        │
+        ├── memory-distillation.log              ← Raw NDJSON ground truth
+        │     Written by logger.appendStageLog('memory-distillation', ...)
+        │     Full Claude CLI stream output for auditing
+        │
+        └── ... (other run artifacts)
+```
+
+### Cross-Run Memory Lifecycle
+
+```
+Run 1 (novel task)                    Run 2 (benefits from Run 1)
+─────────────────                     ─────────────────────────────
+
+Plan stage                            Plan stage
+  worthDistilling: true                 (reads memory from Run 1)
+  ↓                                     ↓
+Execute → Verify                      state.memoryContext includes:
+  ↓                                     "### index.md
+Post-completion:                         | <runId-1>.md | Title | One-liner... |"
+  distillMemory()                       "### <runId-1>.md
+  → .dagclaw/memory/<runId-1>.md        # Human Title
+  → .dagclaw/memory/index.md            > One-liner for retrieval
+    (regenerated)                        ## Summary
+                                         100-200 word narrative...
+                                         ## Key Patterns / ## Gotchas ..."
+                                        ↓
+                                      Execute → Verify
+                                        (agents see Run 1 knowledge)
+                                        ↓
+                                      Post-completion:
+                                        distillMemory()
+                                        → .dagclaw/memory/<runId-2>.md
+                                        → .dagclaw/memory/index.md
+                                          (regenerated with both entries)
+
+v0.2 (future): Two-phase retrieval replaces full context dump:
+  index one-liners → select ~100 → read summaries → narrow ~10-20 → compose context
+  readSummaries() already provides the MemoryEntry[] needed for this flow.
+```
+
 ## File System Layout
 
 ```
@@ -421,9 +812,10 @@ Agents write JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`). The orc
 ├── lock                              ← acquireLock/releaseLock (root only)
 │   {pid: 12345, runId: "...", startedAt: "..."}
 │
-├── memory/                           ← MemoryManager reads
-│   ├── conventions.md
-│   └── patterns.md
+├── memory/                           ← MemoryManager reads/writes
+│   ├── index.md                      ← auto-generated progressive disclosure table
+│   ├── 2026-03-10T02-22-18_641f0bd9.md ← distilled knowledge (named by run ID)
+│   └── 2026-03-10T02-33-37_838c3e07.md ← # slug-title as H1 inside
 │
 └── runs/
     └── 2026-03-05T18-26-46_7ea06bfd/
@@ -447,6 +839,8 @@ Agents write JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`). The orc
         │   ├── execute-subtask-1-retry-1.md
         │   ├── verify.md
         │   └── verify-retry-1.md
+        ├── memory.md                 ← clean distilled text (if worthDistilling)
+        ├── memory-distillation.log   ← raw NDJSON ground truth
         ├── subtasks/
         │   ├── 0.log
         │   └── 1.log

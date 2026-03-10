@@ -18,7 +18,8 @@ core/                          Shared orchestration engine
 ├── dependencyResolver.ts      Topological sort for the subtask DAG.
 ├── taskManager.ts             Lockfile management and task node factory.
 ├── runLogger.ts               Writes manifests, logs, prompts, and verification results to disk.
-├── memoryManager.ts           Reads/writes .dagclaw/memory/ markdown files.
+├── memoryManager.ts           Reads/writes .dagclaw/memory/ markdown files. readSummaries() for retrieval.
+├── memoryDistiller.ts         Post-run distillation: Claude summarizes run → structured memory file.
 └── types.ts                   All interfaces, Zod schemas, and type definitions.
 
 cli/                           Terminal interface
@@ -30,7 +31,8 @@ backend/                       Express + WebSocket server
 │   ├── index.ts               Server entry point. Express app, CORS, auth, security headers.
 │   ├── taskStore.ts           In-memory task lifecycle manager. Wraps TaskOrchestrator.
 │   ├── routes/
-│   │   ├── tasks.ts           REST endpoints: create, list, get, approve, reject, cancel tasks.
+│   │   ├── tasks.ts           REST endpoints: create, list, get, approve, reject, cancel, usage.
+│   │   ├── runs.ts            REST endpoints: list run summaries, get full manifest.
 │   │   └── stages.ts          REST endpoints: CRUD for custom stage definitions.
 │   ├── middleware/
 │   │   ├── auth.ts            API key authentication (timing-safe comparison).
@@ -39,7 +41,7 @@ backend/                       Express + WebSocket server
 │       ├── wsServer.ts        WebSocket server. Auth, subscriptions, broadcasting.
 │       ├── messageBuffer.ts   Per-node ring buffer (1000 messages).
 │       └── subscriptionManager.ts  Bidirectional client-to-node subscription tracking.
-└── __tests__/                 Backend test suite (60 tests).
+└── __tests__/                 Backend test suite (66 tests).
 ```
 
 ## Core Concepts
@@ -278,12 +280,46 @@ Writes everything to `.dagclaw/runs/<runId>/`:
 - `createChildLogger(parentRunId)` — creates a nested logger for child runs (logs go under `parent/children/childRunId/`)
 - `cleanTmp()` / `tmpPath()` — run-scoped tmp directories (`.dagclaw/runs/<runId>/tmp/`), isolated per orchestrator instance
 
-### `core/memoryManager.ts` — Knowledge Injection
+### `core/memoryDistiller.ts` — Post-Run Knowledge Extraction
 
-Reads `.dagclaw/memory/*.md` files and formats them as a context block injected into prompts:
-- `readAll()` — concatenates all markdown files with headers
-- `buildContextBlock(maxChars?)` — wraps with `--- Project Memory ---` header, optional truncation
-- `writeFile()` / `readFile()` — for future memory distillation
+After a successful run, distills what was learned into a structured memory file:
+
+- `DISTILLATION_SYSTEM_PROMPT` — instructs Claude to produce structured markdown: `# Title` → `> one-liner` → `## Summary` → `## Key Patterns` → `## Gotchas` → `## Reusable Insights`
+- `distillMemory(runId, state, logger, memoryManager, opts, runner?)` — the main function:
+  1. Builds a prompt from `PipelineState` (plan summary, subtask descriptions + outcomes, verification result)
+  2. Calls Claude (Sonnet by default, configurable via `--distill-model`)
+  3. Extracts clean text from NDJSON stream via `extractTextFromStreamJson()` in claudeRunner
+  4. Saves three copies: raw log via `logger.appendStageLog()`, per-run `memory.md` via `logger.writeRunMemory()`, project-level `.dagclaw/memory/<runId>.md` via `memoryManager.writeFile()`
+  5. Updates `index.md` via `memoryManager.updateIndex()`
+- No tools given to Claude (`allowedTools: []`) — pure text generation
+- Errors are caught and logged, never thrown (distillation failure should not break the pipeline)
+
+### `core/memoryManager.ts` — Memory Storage & Retrieval
+
+Manages `.dagclaw/memory/` directory. Two responsibilities: writing structured memory files, and reading them back as context for future runs.
+
+**Writing:**
+- `writeFile(filename, content)` — writes a memory file
+- `updateIndex()` — regenerates `index.md` as a 3-column markdown table (Run | Title | Summary) by parsing all memory files
+
+**Reading:**
+- `readAll()` — concatenates all markdown files with `--- filename ---` headers, index.md sorted first
+- `buildContextBlock(maxChars?)` — wraps `readAll()` with `--- Project Memory ---` header, optional truncation. Currently dumps ALL files (no selection)
+- `readFile(filename)` — reads a single memory file
+- `listFiles()` — lists all `.md` files in memory directory
+- `readSummaries()` — returns `MemoryEntry[]` with parsed structured fields from each file (for future two-phase retrieval)
+
+**MemoryEntry interface** (structured parsing for retrieval):
+```typescript
+interface MemoryEntry {
+  filename: string;  // e.g. "2026-03-10T02-22-18_641f0bd9.md"
+  title: string;     // parsed from # H1
+  oneliner: string;  // parsed from > blockquote
+  summary: string;   // parsed from ## Summary section
+}
+```
+
+**Memory injection path:** `taskOrchestrator.ts` calls `buildContextBlock()` once at pipeline start → stored in `state.memoryContext` (immutable for entire run) → injected into Plan and Execute stages via `{{memoryContext}}` template interpolation. Verify stage does NOT receive memory.
 
 ## How to Add a Custom Stage
 
@@ -343,6 +379,9 @@ The backend wraps the core orchestration engine in an Express + WebSocket server
 | `POST` | `/api/stages` | Create a custom stage |
 | `PUT` | `/api/stages/:name` | Update a custom stage |
 | `DELETE` | `/api/stages/:name` | Delete a custom stage |
+| `GET` | `/api/runs` | List run summaries (optional `?status=`, `?limit=`) |
+| `GET` | `/api/runs/:id` | Get full run manifest |
+| `GET` | `/api/tasks/:id/usage` | Get task usage/cost from run manifest |
 | `GET` | `/api/health` | Health check |
 
 ### WebSocket Protocol
@@ -364,6 +403,12 @@ Clients connect to `ws://host:port`. If `CLAW_API_KEY` is set, the first message
 - `{"type":"subtask_complete","taskId":"...","index":0}` — subtask ended
 - `{"type":"approval_required","taskId":"...","message":"..."}` — plan needs approval
 - `{"type":"node_status","taskId":"...","message":"..."}` — status update
+- `{"type":"usage_update","taskId":"...","usage":{...}}` — live cost/token usage update
+- `{"type":"plan_ready","taskId":"...","plan":{...}}` — parsed plan delivered to client
+- `{"type":"task_error","taskId":"...","error":"..."}` — task failed with error
+- `{"type":"task_complete","taskId":"..."}` — task finished successfully
+- `{"type":"verification_result","taskId":"...","result":{...}}` — verification outcome
+- `{"type":"retry","taskId":"...","indices":[...]}` — subtasks being retried
 
 ### Configuration (Environment Variables)
 
@@ -380,8 +425,15 @@ Clients connect to `ws://host:port`. If `CLAW_API_KEY` is set, the first message
 ### Running the Server
 
 ```bash
-# Development (no auth)
+# Full stack (backend + frontend) — recommended
+bash scripts/start_server.sh        # starts both, prints local + LAN URLs
+bash scripts/stop_server.sh         # stops both
+
+# Backend only (development, no auth)
 node --import tsx backend/src/index.ts
+
+# Frontend only (dev server with hot reload)
+cd frontend && npm install && npm run dev
 
 # Production (with auth)
 CLAW_API_KEY=your-secret-key \
@@ -390,17 +442,19 @@ CLAW_CORS_ORIGINS=https://your-frontend.example.com \
   node --import tsx backend/src/index.ts
 ```
 
+PID files are stored in `.dagclaw/pids/`. The start script auto-sources nvm if node isn't on PATH, detects LAN IP, and prints access URLs for both local and network access.
+
 ## Testing
 
 ```bash
-# Core tests (202 tests)
-node --import tsx --test core/__tests__/*.test.ts
+# Core + CLI tests (335 tests)
+node --import tsx --test 'core/__tests__/*.test.ts' 'cli/__tests__/*.test.ts'
 
-# Backend tests (60 tests)
-node --import tsx --test backend/__tests__/*.test.ts
+# Backend tests (66 tests)
+node --import tsx --test 'backend/__tests__/*.test.ts'
 
-# All tests
-node --import tsx --test core/__tests__/*.test.ts backend/__tests__/*.test.ts
+# All tests (401 tests)
+node --import tsx --test 'core/__tests__/*.test.ts' 'cli/__tests__/*.test.ts' 'backend/__tests__/*.test.ts'
 
 # Type check
 npx tsc --noEmit
@@ -436,3 +490,104 @@ bash test_scripts/e2e-dag-stages.sh   # per-subtask stage routing
 8. **Per-subtask stage routing** — subtasks can specify a `stage` field to run through different stage definitions. The Plan stage validates stage references against the DAG palette. Only Execute-stage subtasks can be recursively decomposed.
 9. **Custom stages via config** — `dagclaw.config.json` (declarative, Zod-validated) or `dagclaw.config.ts` (full `StageDefinition` with functions). Merged with built-ins at startup. Reserved names protected.
 10. **DagDisplay as sole stdout coordinator** — during active DAG display, all stdout writes go through `DagDisplay.writeStatus()` (via `dagAwareLog` in cli.ts) to prevent interleaved writes from breaking ANSI cursor math.
+
+## Memory Structure
+
+Memory files live in `.dagclaw/memory/` and are named after run IDs (e.g., `2026-03-10T02-22-18_641f0bd9.md`). Each file follows a structured format designed for progressive retrieval:
+
+```markdown
+# Human-Readable Title Describing What Was Done
+
+> One-line summary (max 150 chars) for index scanning and relevance assessment.
+
+## Summary
+
+100-200 word narrative covering: what the task accomplished, approach taken,
+key technical decisions, and outcome. Helps a model decide whether to read
+the detailed sections below.
+
+## Key Patterns
+- Specific, reusable patterns discovered during the run
+
+## Gotchas
+- Pitfalls and edge cases encountered
+
+## Reusable Insights
+- Techniques applicable to future runs
+```
+
+**Two-tier storage:**
+- **Per-run** (`.dagclaw/runs/<id>/memory.md`) — copy of the distilled memory, tied to the run's log directory
+- **Project-level** (`.dagclaw/memory/<runId>.md`) — the shared memory pool read by future runs
+
+**Index** (`.dagclaw/memory/index.md`) — auto-generated 3-column markdown table: `| Run | Title | Summary |`. Titles and one-liners are parsed from each memory file. Designed for a future two-phase retrieval system (v0.2) where a model scans the index → selects candidates → reads summaries → narrows to 10-20 most relevant → composes detailed context.
+
+**Current limitation:** `buildContextBlock()` dumps ALL memory files into context with no selection. This works for early runs but will need the two-phase retrieval system as memory accumulates.
+
+## Frontend
+
+React SPA built with Vite, Tailwind CSS, xterm.js, and Zustand. Communicates with the backend via REST (task creation, listing) and WebSocket (real-time updates, approval flow, terminal output).
+
+### Architecture
+
+**Three-panel layout** (`App.tsx`):
+- **Left:** `Sidebar` — task list, create task form, connection indicator
+- **Center:** `TaskTreeView` — DAG visualization with subtask nodes showing status
+- **Right:** `DetailPanel` — plan view, execution view (terminal output), verification results, stage indicator
+
+**State management** (`stores/orchestratorStore.ts`):
+- Zustand store with `rootTasks`, `nodeMap`, `plans`, `verifications`, `subtaskStatuses`, `stageInfo`
+- `handleWsMessage()` dispatches all WS events to state updates
+- Derived selectors for selected task, plan, verification, stage info
+
+**WebSocket** (`hooks/useWebSocket.ts`):
+- Singleton connection with exponential backoff reconnection (1s → 30s max)
+- Auto-resubscribes to active task subscriptions on reconnect
+- `subtask_output` messages bypass Zustand and go directly to xterm.js terminals via a callback registry (performance: avoids re-renders for high-frequency terminal data)
+- LAN-aware URL: uses `window.location.host` when not on localhost
+
+**Components:**
+| Component | Purpose |
+|-----------|---------|
+| `Sidebar` | Task list with status badges, `CreateTaskForm` for new tasks |
+| `CreateTaskForm` | Prompt input, workDir, pipeline, autoApprove toggle |
+| `TaskTreeView` | DAG node layout with `TaskTreeNode` per subtask |
+| `TaskTreeNode` | Single node: status icon, description, dependency arrows |
+| `DetailPanel` | Tabbed detail view for selected task |
+| `StageIndicator` | Shows current pipeline stage (Plan/Execute/Verify) |
+| `PlanView` | Displays plan summary, subtask list, quality flags |
+| `ExecutionView` | Per-subtask `SubtaskTerminal` instances |
+| `SubtaskTerminal` | xterm.js terminal showing live Claude output |
+| `VerifyView` | Verification results: per-subtask pass/fail, integration check |
+| `ApprovalBanner` | Plan approval/reject buttons when awaiting approval |
+
+### Frontend Source Files
+
+```
+frontend/
+├── src/
+│   ├── App.tsx                    Three-panel layout, WS connection init
+│   ├── main.tsx                   React entry point
+│   ├── types.ts                   Task, Plan, Verification, WS message types
+│   ├── index.css                  Tailwind imports
+│   ├── stores/
+│   │   └── orchestratorStore.ts   Zustand store, WS message handler, selectors
+│   ├── hooks/
+│   │   └── useWebSocket.ts        Singleton WS, reconnection, subscription mgmt
+│   └── components/
+│       ├── Sidebar.tsx            Task list + create form
+│       ├── CreateTaskForm.tsx     Task creation form
+│       ├── TaskTreeView.tsx       DAG visualization
+│       ├── TaskTreeNode.tsx       Individual DAG node
+│       ├── DetailPanel.tsx        Right panel: plan/exec/verify views
+│       ├── StageIndicator.tsx     Current stage badge
+│       ├── PlanView.tsx           Plan display
+│       ├── ExecutionView.tsx      Subtask terminal container
+│       ├── SubtaskTerminal.tsx    xterm.js terminal per subtask
+│       ├── VerifyView.tsx         Verification results
+│       └── ApprovalBanner.tsx     Approve/reject controls
+├── index.html
+├── package.json                   Dependencies: react, zustand, xterm, tailwindcss
+├── vite.config.ts                 Dev server proxy to backend:3001
+└── tailwind.config.js
+```

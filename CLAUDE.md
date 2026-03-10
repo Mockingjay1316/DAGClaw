@@ -85,11 +85,15 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 - `core/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, per-subtask stage routing, recursive decomposition
 - `core/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading
 - `core/runLogger.ts` — Persistent logging to `.dagclaw/runs/`
-- `core/memoryManager.ts` — Memory distillation and injection from `.dagclaw/memory/`
+- `core/memoryManager.ts` — Memory storage, retrieval, index generation from `.dagclaw/memory/`
+- `core/memoryDistiller.ts` — Post-run knowledge extraction: Claude summarizes run → structured memory file
 - `core/taskManager.ts` — Lockfile management, task node creation, `TaskRegistry` for parent/child tracking
 - `core/promptBuilder.ts` — Template interpolation, snapshot formatting
 - `cli/cli.ts` — CLI entry point, arg parsing, terminal output
 - `cli/dagDisplay.ts` — Live DAG status display (TTY ANSI in-place updates, non-TTY fallback), stage ticker
+- `backend/src/routes/runs.ts` — REST endpoints for run history and manifests
+- `frontend/src/stores/orchestratorStore.ts` — Zustand store, WS message handler, selectors
+- `frontend/src/hooks/useWebSocket.ts` — Singleton WS connection, reconnection, subscription management
 
 ## Conventions
 

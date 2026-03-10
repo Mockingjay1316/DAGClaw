@@ -473,7 +473,8 @@ DAGClaw v0.1.0 is a working multi-stage recursive orchestration engine with CLI,
 - Recursive decomposition — subtasks spawn child orchestrators with their own pipelines
 - Custom stages via `dagclaw.config.json` / `dagclaw.config.ts` (domain-agnostic)
 - Persistent run logs (`.dagclaw/runs/`) with full prompt capture and cost tracking
-- Project memory injection from `.dagclaw/memory/`
+- Project memory injection from `.dagclaw/memory/` (structured format: title, one-liner, summary, details)
+- Memory distillation after successful runs (`--distill-model`, `--no-memory`)
 - Live TTY DAG display with elapsed tickers, tree-format cost summary
 - Express + WebSocket backend with auth, rate limiting, path traversal prevention
 - React frontend with task tree, plan approval, xterm.js terminals, real-time WebSocket updates
@@ -481,9 +482,9 @@ DAGClaw v0.1.0 is a working multi-stage recursive orchestration engine with CLI,
 
 ### Known Limitations
 
-- Memory distillation is stubbed (`worthDistilling` flag exists but pipeline not wired)
-- No execute-level retry (only verify-level retry exists)
-- No per-worker model selection (all workers use same model)
+- Memory injection is a full dump of all files (no selective retrieval — planned for v0.2)
+- Verify stage does not receive memory context
+- No plan replay or per-subtask resume
 - Frontend lacks: activity timeline, cost/token display, context visualization, run history browser
 - No context budget enforcement (prompt assembly has no size limits)
 - No plan replay / dry run mode
@@ -614,45 +615,102 @@ The frontend adds a "Run History" view that reads from `.dagclaw/runs/`. Each ru
 
 Memory is a **derived layer** on top of raw run logs — not a replacement. Raw logs are the source of truth for accountability; memory is the distilled, evolving knowledge that makes future runs smarter.
 
-### How it works
+### How it works — Two-tier storage
+
+Memory uses a **two-tier architecture**: per-run memory (tied to a single run) and project-level memory (aggregated across runs). Raw NDJSON stream output is preserved as ground truth alongside clean distilled summaries.
 
 ```
-Raw logs (.dagclaw/runs/)          Memory (.dagclaw/memory/)
-┌──────────────────┐           ┌──────────────────┐
-│ run 1 logs       │──distill──▶ codebase.md      │
-│ run 2 logs       │──distill──▶ patterns.md      │
-│ run 3 logs       │──distill──▶ errors.md        │
-│ ...              │           │ ...               │
-└──────────────────┘           └──────────────────┘
-                                       │
-                                       ▼
-                               Fed into future
-                               Claude Code instances
-                               as context
+Per-run tier                          Project-level tier
+┌──────────────────────────┐       ┌──────────────────────────┐
+│ .dagclaw/runs/<id>/      │       │ .dagclaw/memory/         │
+│ ├── memory.md            │       │ ├── index.md             │
+│ │   (clean distilled     │       │ │   (3-column table:     │
+│ │    summary)             │       │ │    Run|Title|Summary)   │
+│ ├── memory-distillation  │       │ ├── <runId>.md           │
+│ │   .log                 │       │ ├── <runId>.md           │
+│ │   (raw NDJSON ground   │       │ └── ...                  │
+│ │    truth)               │       └──────────────────────────┘
+│ └── ...                  │                    │
+└──────────────────────────┘                    ▼
+         │                             Fed into future
+         └───── distill ──────▶        Claude Code instances
+                                       as context
 ```
 
 ### Storage
 
 ```
 .dagclaw/
-├── runs/              # raw logs (source of truth, never modified)
+├── runs/
+│   └── <run-id>/
+│       ├── manifest.json            # run metadata (source of truth, never modified)
+│       ├── memory.md                # clean distilled summary for this run
+│       └── memory-distillation.log  # raw NDJSON stream output (ground truth)
 ├── memory/
-│   ├── index.md       # summary of what memory files exist and when last updated
-│   ├── codebase.md    # codebase conventions, architecture notes, key file paths
-│   ├── patterns.md    # what worked: successful strategies, useful patterns
-│   └── errors.md      # recurring errors and their solutions
+│   ├── index.md                     # auto-generated index: | Run | Title | Summary |
+│   ├── <runId>.md                   # per-run memory (named by run ID for sortable browsing)
+│   └── ...
 └── config.json
 ```
 
+### Structured memory file format
+
+Each project-level memory file follows a structured format designed for both human readability and machine retrieval:
+
+```markdown
+# Human-Readable Title
+
+> One-line summary for index retrieval (max 150 chars, precise and searchable).
+
+## Summary
+
+100-200 word narrative paragraph covering what was done, the approach taken,
+key technical decisions, and outcome.
+
+## Key Patterns
+Specific reusable patterns with code snippets.
+
+## Gotchas
+Problems encountered and their solutions.
+
+## Reusable Insights
+1. Actionable takeaway A.
+2. Actionable takeaway B.
+```
+
+The distillation system prompt instructs Claude to produce this exact format. The structured layout enables a **two-phase retrieval** approach (v0.2):
+
+1. **Index scan**: match `> ` one-liners against current task → select ~100 most relevant
+2. **Summary scan**: read 100-200 word `## Summary` sections → narrow to ~10-20
+3. **Full read**: load complete files for selected entries → compose detailed context
+
+The `readSummaries()` method on `MemoryManager` returns `MemoryEntry[]` with `{filename, title, oneliner, summary}` — the ingredients needed for this flow.
+
+### Index format
+
+`index.md` is auto-generated by `updateIndex()` after each distillation:
+
+```
+| Run | Title | Summary |
+|-----|-------|---------|
+| 2026-03-10T02-22-18_641f0bd9.md | Added Model Selection | Added --distill-model flag... |
+| 2026-03-10T02-33-37_838c3e07.md | Backend REST Endpoints | Added GET /api/runs endpoints... |
+```
+
+The one-liner summaries are designed for model reasoning — precise enough that a model can decide relevance without reading the full file.
+
 ### Memory lifecycle
 
-1. **After each run completes**, the orchestrator runs a lightweight **memory distillation step**: a Claude Code instance reads the run's plan, execution output, and verification results, then updates the relevant memory files. This is a short, focused prompt: "Given this run's results, update the project memory files with any new learnings."
+1. **After each run completes**, if `plan.worthDistilling` is true and `--no-memory` is not set, the orchestrator runs a **memory distillation step**: a Claude instance (default: Sonnet, configurable via `--distill-model`) reads the run's plan, execution output, and verification results, then produces a structured memory entry. Three outputs are saved:
+   - **Raw ground truth**: `memory-distillation.log` (NDJSON stream) in `.dagclaw/runs/<id>/`
+   - **Per-run clean**: `memory.md` (extracted markdown) in `.dagclaw/runs/<id>/`
+   - **Project-level**: `<runId>.md` in `.dagclaw/memory/`, then `updateIndex()` regenerates `index.md`
 
-2. **Before each run starts**, the orchestrator reads `.dagclaw/memory/` and injects relevant content into the Claude Code instances' system context. The Plan stage gets all memory (to inform decomposition); Execute subtasks get memory relevant to their scope.
+2. **Before each run starts**, the orchestrator reads `.dagclaw/memory/` via `buildContextBlock()` and injects all content into `PipelineState.memoryContext`. This is set once and shared by all stages. Currently (v0.1.0) this is a full dump of all memory files — Plan and Execute stages receive it via `{{memoryContext}}` template interpolation. Verify does not receive memory context. v0.2 will replace this with selective retrieval using the structured format.
 
-3. **Memory evolves**: each distillation can update, consolidate, or prune memory entries. Old patterns get refined, outdated info gets removed. The memory files stay concise.
+3. **User-editable**: since memory is plain markdown, the user can read, edit, or delete entries at any time. Full transparency and control. Editing a project-level file takes effect on the next run; per-run files are historical records.
 
-4. **User-editable**: since memory is plain markdown, the user can read, edit, or delete entries at any time. Full transparency and control.
+4. **Ground truth preservation**: the raw NDJSON `memory-distillation.log` is always kept alongside the clean `memory.md`. If the extraction logic changes or a distillation seems wrong, the raw stream can be re-processed via `extractTextFromStreamJson()`.
 
 ### What gets distilled
 - Codebase conventions discovered (naming, architecture, patterns)
@@ -666,8 +724,8 @@ Raw logs (.dagclaw/runs/)          Memory (.dagclaw/memory/)
 - Temporary/session-specific context
 - Anything the user explicitly deletes
 
-### Memory in the web UI (Phase 4+)
-The frontend adds a "Memory" panel where users can browse and edit `.dagclaw/memory/` files. Shows when each entry was last updated and which run it originated from.
+### Memory in the web UI (v0.2+)
+The frontend adds a "Memory" panel where users can browse and edit `.dagclaw/memory/` files. Shows the title, one-liner summary, and which run each entry originated from.
 
 ---
 
@@ -827,10 +885,11 @@ This gives users a natural "pick up where I left off" workflow.
 
 ### v0.1.1 — Next (interleaved backend + frontend)
 
-**Backend:**
-- **Memory distillation pipeline** — Activate `worthDistilling` flag. After successful run, distillation Claude call generates memory entries. New `core/memoryDistiller.ts` (~100 lines).
-- **Execute-level retry** — DAG runner retries failed subtasks before cascade-skipping. `maxAttempts` on stage config, `retryWorthy: boolean` on executor output.
-- **Per-worker model selection** — `--model` for global default, `--dag-model` for DAG override, per-stage model in `dagclaw.config.json`. Enables Opus for Plan/Verify + Sonnet for Execute.
+**Backend (done):**
+- ~~**Memory distillation pipeline**~~ — Structured memory format with title, one-liner, summary, detailed sections. Two-tier storage (per-run + project-level). NDJSON extraction. `readSummaries()` API for future retrieval. `--distill-model` flag.
+- ~~**Execute-level retry**~~ — DAG runner retries failed subtasks before cascade-skipping. `maxSubtaskRetries`, `retryWorthy` signaling, `ClaudeRunError` always retryable.
+- ~~**Per-worker model selection**~~ — `--model` for global default, `--dag-model` for DAG override, per-stage model in `dagclaw.config.json`. `resolveModel()` helper.
+- ~~**Runs/usage API**~~ — `GET /api/runs`, `GET /api/runs/:id`, `GET /api/tasks/:id/usage`, `usage_update` WebSocket broadcasts.
 
 **Frontend:**
 - Activity timeline (event log with timestamps)
@@ -842,7 +901,8 @@ This gives users a natural "pick up where I left off" workflow.
 ### v0.2 — Context management + visualization
 
 **Backend:**
-- **Advanced context management** — Budget enforcement in `runOne()`, drop strategies (compact tier first, oldest transitive deps), relevance scoring.
+- **Two-phase memory retrieval** — Replace naive `buildContextBlock()` (dumps all files) with selective retrieval: index scan → summary scan → full read. Uses `readSummaries()` (already implemented) + relevance scoring against current task prompt. Compose only the ~10-20 most relevant memories into context.
+- **Context budget enforcement** — Budget enforcement in `runOne()`, drop strategies (compact tier first, oldest transitive deps).
 - **Plan replay / dry run** — `--plan <runId>` to reuse previous plan, `--dry-run` to plan-only.
 - **Per-subtask resume** — `--resume <runId>` reloads plan, skips completed subtasks, re-runs from failure point.
 - **Stage lifecycle hooks** — `preRun?` / `postRun?` on StageDefinition. Two hooks only, orchestrator stays stage-agnostic.
@@ -850,14 +910,14 @@ This gives users a natural "pick up where I left off" workflow.
 
 **Frontend:**
 - Context flow visualization (what context each subtask receives)
-- Memory panel (view/edit `.dagclaw/memory/`)
+- Memory panel (view/edit `.dagclaw/memory/`, show title + one-liner + summary per entry)
 - Prompt inspector (view exact prompts sent to Claude)
 - DAG graph visualization (interactive dependency graph)
 
 ### v0.3 — Ecosystem
 
 - Per-subtask tool scoping (`allowedTools` field in SubtaskSchema, planner restricts tools)
-- Structured memory with frontmatter tags, `--memory-dir` flag, tag-based filtering for context injection
+- `--memory-dir` flag for custom memory directory, tag-based filtering for context injection
 - Run comparison / diff (`dagclaw diff <id1> <id2>` — compare plans, costs, outcomes)
 - Shareable stage presets — importable config fragments (`dagclaw.presets/`) for reusable StageDefinition bundles
 - CI integration — trigger templated task pipelines on CI failure (just another task, no special handling)

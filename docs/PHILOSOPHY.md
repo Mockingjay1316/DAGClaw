@@ -22,6 +22,9 @@ Memory and context management are the heart of the framework:
 - What context does each subtask receive? (snapshots, memory, file state)
 - How much context fits in the budget? (drop strategies, relevance scoring)
 - What's worth remembering for future runs? (memory distillation)
+- How do you find the right memories? (structured retrieval: index → summary → detail)
+
+Memory files are structured for retrieval, not just storage. Each has a human-readable title, a one-line summary for index scanning, a 100-200 word narrative for relevance assessment, and detailed patterns/gotchas for actual use. This mirrors how recommendation systems work: coarse filter → fine filter → full content.
 
 These are the hard problems. Inter-agent chat protocols are a distraction.
 
