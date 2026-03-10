@@ -7,6 +7,7 @@ import {
   ClaudeRunError,
   runClaudeCli,
   buildCliArgs,
+  extractFailureFromRawOutput,
 } from '../claudeRunner.ts';
 import type { RunClaudeOptions } from '../claudeRunner.ts';
 
@@ -124,6 +125,104 @@ describe('claudeRunner', () => {
         backend: { type: 'cli' },
       });
       assert.ok(!args.includes('--model'), 'args should NOT contain --model flag when model is not set');
+    });
+  });
+
+  describe('extractFailureFromRawOutput', () => {
+    it('returns no-output fallback for empty string', () => {
+      const result = extractFailureFromRawOutput('');
+      assert.deepEqual(result, {
+        success: false,
+        summary: 'No output from executor',
+        oneliner: 'No output',
+        retryWorthy: true,
+      });
+    });
+
+    it('returns no-output fallback for whitespace-only string', () => {
+      const result = extractFailureFromRawOutput('   \n\t  ');
+      assert.deepEqual(result, {
+        success: false,
+        summary: 'No output from executor',
+        oneliner: 'No output',
+        retryWorthy: true,
+      });
+    });
+
+    it('returns no-output fallback for null input', () => {
+      const result = extractFailureFromRawOutput(null as unknown as string);
+      assert.deepEqual(result, {
+        success: false,
+        summary: 'No output from executor',
+        oneliner: 'No output',
+        retryWorthy: true,
+      });
+    });
+
+    it('returns no-output fallback for undefined input', () => {
+      const result = extractFailureFromRawOutput(undefined as unknown as string);
+      assert.deepEqual(result, {
+        success: false,
+        summary: 'No output from executor',
+        oneliner: 'No output',
+        retryWorthy: true,
+      });
+    });
+
+    it('detects "Error:" pattern and extracts message', () => {
+      const raw = 'Some preamble\nError: Something went wrong\nMore text';
+      const result = extractFailureFromRawOutput(raw);
+      assert.ok(result !== null);
+      assert.equal(result!.success, false);
+      assert.equal(result!.retryWorthy, true);
+      assert.ok(result!.summary.includes('Something went wrong'), `summary should contain error message, got: ${result!.summary}`);
+    });
+
+    it('detects lowercase "error" pattern', () => {
+      const raw = 'fatal error occurred during execution';
+      const result = extractFailureFromRawOutput(raw);
+      assert.ok(result !== null);
+      assert.equal(result!.success, false);
+      assert.equal(result!.retryWorthy, true);
+    });
+
+    it('detects "permission denied" and marks not retryWorthy', () => {
+      const raw = 'bash: ./script.sh: permission denied\nExecution failed';
+      const result = extractFailureFromRawOutput(raw);
+      assert.ok(result !== null);
+      assert.equal(result!.success, false);
+      assert.equal(result!.retryWorthy, false);
+      assert.ok(
+        result!.summary.toLowerCase().includes('permission denied'),
+        `summary should contain 'permission denied', got: ${result!.summary}`,
+      );
+    });
+
+    it('detects SIGTERM and marks retryWorthy', () => {
+      const raw = 'Process received SIGTERM, shutting down';
+      const result = extractFailureFromRawOutput(raw);
+      assert.ok(result !== null);
+      assert.equal(result!.success, false);
+      assert.equal(result!.retryWorthy, true);
+    });
+
+    it('detects timeout and marks retryWorthy', () => {
+      const raw = 'Command timed out after 120 seconds\ntimeout reached';
+      const result = extractFailureFromRawOutput(raw);
+      assert.ok(result !== null);
+      assert.equal(result!.success, false);
+      assert.equal(result!.retryWorthy, true);
+    });
+
+    it('returns missing-JSON fallback for normal text output without error patterns', () => {
+      const raw = 'I have completed the task successfully.\nAll files were updated as requested.\nThe implementation looks good.';
+      const result = extractFailureFromRawOutput(raw);
+      assert.deepEqual(result, {
+        success: false,
+        summary: 'Executor did not produce structured output',
+        oneliner: 'Missing JSON output',
+        retryWorthy: true,
+      });
     });
   });
 });

@@ -6,6 +6,7 @@ import {
   verifyResultInterpreter,
   formatStageDescriptions,
 } from '../stageDefinitions.ts';
+import { SubtaskError } from '../types.ts';
 import type { PipelineState } from '../types.ts';
 
 function makePipelineState(overrides?: Partial<PipelineState>): PipelineState {
@@ -169,6 +170,18 @@ describe('stageDefinitions', () => {
         /Subtask 0 failed/,
       );
     });
+
+    it('throws SubtaskError with retryWorthy when parsedOutput is null', () => {
+      const state = makePipelineState();
+      const subtask = { index: 0, prompt: 'Do X', dependencies: [] };
+      try {
+        BUILTIN_STAGES.Execute.resultHandler(state, null, subtask);
+        assert.fail('Expected SubtaskError to be thrown');
+      } catch (err) {
+        assert.ok(err instanceof SubtaskError, 'Error should be a SubtaskError');
+        assert.equal((err as SubtaskError).retryWorthy, true);
+      }
+    });
   });
 
   describe('Verify resultHandler', () => {
@@ -280,6 +293,40 @@ describe('stageDefinitions', () => {
       assert.equal(interpreted.pass, false);
       // Only index 1 has retryRecommended
       assert.deepEqual(interpreted.failedIndices, [1]);
+    });
+
+    it('overrides overallPass when failed subtasks exist', () => {
+      const result = {
+        overallPass: true,
+        subtaskResults: [
+          { subtaskIndex: 0, pass: true, summary: 'ok', retryRecommended: false },
+          { subtaskIndex: 1, pass: false, summary: 'bad', retryRecommended: true },
+        ],
+        skippedIndices: [],
+        integrationResult: { pass: true, summary: 'ok', issues: [] },
+      };
+
+      const interpreted = verifyResultInterpreter(result);
+      assert.equal(interpreted.pass, false, 'pass should be false when any subtask fails');
+      assert.deepEqual(interpreted.failedIndices, [1]);
+    });
+
+    it('includes skipped indices in failedIndices for retry when subtaskResults show pass', () => {
+      const result = {
+        overallPass: true,
+        subtaskResults: [
+          { subtaskIndex: 0, pass: true, summary: 'ok', retryRecommended: false },
+          { subtaskIndex: 1, pass: true, summary: 'skipped - not checked', retryRecommended: false },
+          { subtaskIndex: 2, pass: true, summary: 'skipped - not checked', retryRecommended: false },
+        ],
+        skippedIndices: [1, 2],
+        integrationResult: { pass: true, summary: 'ok', issues: [] },
+      };
+
+      const interpreted = verifyResultInterpreter(result);
+      assert.equal(interpreted.pass, false, 'pass should be false when skipped subtasks exist');
+      assert.ok(interpreted.failedIndices.includes(1), 'skipped index 1 should be in failedIndices');
+      assert.ok(interpreted.failedIndices.includes(2), 'skipped index 2 should be in failedIndices');
     });
   });
 

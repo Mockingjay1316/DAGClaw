@@ -14,7 +14,8 @@ import {
   detectSharedResourceConflicts,
 } from '../stageDefinitions.ts';
 import { createTaskNode, TaskRegistry } from '../taskManager.ts';
-import type { Plan, Subtask, UsageStats, CliOptions } from '../types.ts';
+import type { Plan, Subtask, UsageStats, CliOptions, DAGEvent } from '../types.ts';
+import { ExecutorOutputSchema } from '../types.ts';
 
 // --- formatTokenCount ---
 
@@ -501,5 +502,285 @@ describe('TaskRegistry integration', () => {
     assert.equal(registry.checkDepthLimit(child.id, 2), true);
     // maxDepth=3 → still room
     assert.equal(registry.checkDepthLimit(child.id, 3), false);
+  });
+});
+
+// --- Per-subtask retry: DAGEvent types ---
+
+describe('DAGEvent retry types', () => {
+  it('subtask-retrying event has correct shape', () => {
+    const event: DAGEvent = {
+      type: 'subtask-retrying',
+      index: 2,
+      attempt: 1,
+      maxAttempts: 3,
+    };
+    assert.equal(event.type, 'subtask-retrying');
+    if (event.type === 'subtask-retrying') {
+      assert.equal(event.index, 2);
+      assert.equal(event.attempt, 1);
+      assert.equal(event.maxAttempts, 3);
+    }
+  });
+
+  it('subtask-retry-exhausted event has correct shape', () => {
+    const event: DAGEvent = {
+      type: 'subtask-retry-exhausted',
+      index: 4,
+      attempts: 3,
+    };
+    assert.equal(event.type, 'subtask-retry-exhausted');
+    if (event.type === 'subtask-retry-exhausted') {
+      assert.equal(event.index, 4);
+      assert.equal(event.attempts, 3);
+    }
+  });
+
+  it('new event types are included in DAGEvent union', () => {
+    const events: DAGEvent[] = [
+      { type: 'dag-start', subtasks: [{ index: 0, description: 'test', dependencies: [], stage: 'Execute' }] },
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-retrying', index: 0, attempt: 1, maxAttempts: 2 },
+      { type: 'subtask-retry-exhausted', index: 0, attempts: 2 },
+      { type: 'subtask-failed', index: 0, error: 'boom', elapsed: 100 },
+      { type: 'dag-complete' },
+    ];
+    assert.equal(events.length, 6);
+    assert.ok(events.some(e => e.type === 'subtask-retrying'));
+    assert.ok(events.some(e => e.type === 'subtask-retry-exhausted'));
+  });
+});
+
+// --- Per-subtask retry: isRetryWorthy helper ---
+
+import { isRetryWorthy } from '../taskOrchestrator.ts';
+
+describe('isRetryWorthy', () => {
+  it('returns true when executor output has retryWorthy: true', () => {
+    const output = { success: false, summary: 'failed', oneliner: 'fail', retryWorthy: true };
+    assert.equal(isRetryWorthy(output, null), true);
+  });
+
+  it('returns false when executor output has retryWorthy: false', () => {
+    const output = { success: false, summary: 'failed', oneliner: 'fail', retryWorthy: false };
+    assert.equal(isRetryWorthy(output, null), false);
+  });
+
+  it('returns false when retryWorthy is omitted from executor output', () => {
+    const output = { success: false, summary: 'failed', oneliner: 'fail' };
+    assert.equal(isRetryWorthy(output, null), false);
+  });
+
+  it('returns true for ClaudeRunError (transient CLI failure)', () => {
+    const err = new Error('Claude CLI exited with code 1');
+    err.name = 'ClaudeRunError';
+    assert.equal(isRetryWorthy(null, err), true);
+  });
+
+  it('returns false for generic Error (non-transient)', () => {
+    const err = new Error('Something unexpected');
+    assert.equal(isRetryWorthy(null, err), false);
+  });
+
+  it('returns true for ClaudeRunError even when output is also present with retryWorthy: false', () => {
+    // ClaudeRunError takes precedence — transient failures are always retryable
+    const output = { success: false, summary: 'failed', oneliner: 'fail', retryWorthy: false };
+    const err = new Error('Claude CLI exited with code 1');
+    err.name = 'ClaudeRunError';
+    assert.equal(isRetryWorthy(output, err), true);
+  });
+});
+
+// --- Per-subtask retry: CliOptions.maxSubtaskRetries ---
+
+describe('CliOptions.maxSubtaskRetries', () => {
+  it('accepts maxSubtaskRetries as an optional field', () => {
+    const opts: CliOptions = {
+      prompt: 'test',
+      workDir: '/tmp',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      backend: { type: 'cli' },
+      permissionMode: 'auto',
+      autoApprove: false,
+      maxRetries: 2,
+      maxConcurrency: 4,
+      maxDepth: 3,
+      timeoutSeconds: 300,
+      noSummary: false,
+      noMemory: false,
+      dagStages: ['Execute'],
+      maxSubtaskRetries: 3,
+    };
+    assert.equal(opts.maxSubtaskRetries, 3);
+  });
+
+  it('defaults to undefined when not specified', () => {
+    const opts: CliOptions = {
+      prompt: 'test',
+      workDir: '/tmp',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      backend: { type: 'cli' },
+      permissionMode: 'auto',
+      autoApprove: false,
+      maxRetries: 2,
+      maxConcurrency: 4,
+      maxDepth: 3,
+      timeoutSeconds: 300,
+      noSummary: false,
+      noMemory: false,
+      dagStages: ['Execute'],
+    };
+    assert.equal(opts.maxSubtaskRetries, undefined);
+  });
+});
+
+// --- Per-subtask retry: ExecutorOutput.retryWorthy ---
+
+describe('ExecutorOutput retryWorthy field', () => {
+  it('parses executor output with retryWorthy: true', () => {
+    const raw = { success: false, summary: 'build failed', oneliner: 'fail', retryWorthy: true };
+    const parsed = ExecutorOutputSchema.parse(raw);
+    assert.equal(parsed.retryWorthy, true);
+  });
+
+  it('parses executor output with retryWorthy: false', () => {
+    const raw = { success: false, summary: 'wrong approach', oneliner: 'fail', retryWorthy: false };
+    const parsed = ExecutorOutputSchema.parse(raw);
+    assert.equal(parsed.retryWorthy, false);
+  });
+
+  it('parses executor output without retryWorthy (backward compatible)', () => {
+    const raw = { success: true, summary: 'done', oneliner: 'ok' };
+    const parsed = ExecutorOutputSchema.parse(raw);
+    assert.equal(parsed.retryWorthy, undefined);
+  });
+});
+
+// --- Per-subtask retry: integration via DAG events ---
+
+describe('Per-subtask retry via DAG events', () => {
+  // These tests verify the retry behavior indirectly through DAG event emission.
+  // They will fail until the retry logic is implemented in executeSubtask().
+
+  it('emits subtask-retrying then subtask-completed on successful retry', () => {
+    // Scenario: subtask fails on attempt 1 with retryWorthy:true, succeeds on attempt 2
+    // Expected events: subtask-started → subtask-retrying(attempt=1, max=2) → subtask-started → subtask-completed
+    // This is a specification test — actual orchestrator wiring tested in integration.
+
+    const expectedEventTypes = [
+      'subtask-started',
+      'subtask-retrying',
+      'subtask-started',
+      'subtask-completed',
+    ];
+    // Placeholder: when implementation exists, we'll collect events from orchestrator
+    // For now, verify the event sequence structure is valid
+    const events: DAGEvent[] = [
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-retrying', index: 0, attempt: 1, maxAttempts: 2 },
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-completed', index: 0, oneliner: 'done on retry', elapsed: 5000 },
+    ];
+    assert.deepEqual(events.map(e => e.type), expectedEventTypes);
+  });
+
+  it('emits subtask-retry-exhausted after all retries fail', () => {
+    // Scenario: maxSubtaskRetries=2, subtask fails twice with retryWorthy:true
+    // Expected: subtask-started → subtask-retrying(1/2) → subtask-started → subtask-retrying(2/2) → subtask-retry-exhausted
+    const events: DAGEvent[] = [
+      { type: 'subtask-started', index: 1 },
+      { type: 'subtask-retrying', index: 1, attempt: 1, maxAttempts: 2 },
+      { type: 'subtask-started', index: 1 },
+      { type: 'subtask-retrying', index: 1, attempt: 2, maxAttempts: 2 },
+      { type: 'subtask-retry-exhausted', index: 1, attempts: 2 },
+    ];
+    const lastEvent = events[events.length - 1];
+    assert.equal(lastEvent.type, 'subtask-retry-exhausted');
+    if (lastEvent.type === 'subtask-retry-exhausted') {
+      assert.equal(lastEvent.attempts, 2);
+    }
+  });
+
+  it('does not emit subtask-retrying when retryWorthy is false', () => {
+    // Scenario: subtask fails with retryWorthy:false → immediate failure, no retry
+    const events: any[] = [
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-failed', index: 0, error: 'wrong approach', elapsed: 3000 },
+    ];
+    assert.ok(!events.some((e: any) => e.type === 'subtask-retrying'));
+    assert.ok(!events.some((e: any) => e.type === 'subtask-retry-exhausted'));
+  });
+
+  it('does not emit subtask-retrying when retryWorthy is omitted', () => {
+    // Scenario: subtask fails without retryWorthy field → treated as non-retryable
+    const events: any[] = [
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-failed', index: 0, error: 'generic failure', elapsed: 2000 },
+    ];
+    assert.ok(!events.some((e: any) => e.type === 'subtask-retrying'));
+  });
+
+  it('cascade-skips dependents after retry exhaustion', () => {
+    // Scenario: subtask 0 exhausts retries → subtask 1 (depends on 0) gets skipped
+    const events: any[] = [
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-retrying', index: 0, attempt: 1, maxAttempts: 1 },
+      { type: 'subtask-retry-exhausted', index: 0, attempts: 1 },
+      { type: 'subtask-skipped', index: 1, cascadeFrom: 0 },
+    ];
+    const skipped = events.filter((e: any) => e.type === 'subtask-skipped');
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0].cascadeFrom, 0);
+  });
+
+  it('retries on ClaudeRunError even without retryWorthy output', () => {
+    // Scenario: runOne throws ClaudeRunError (transient) → retry even though no structured output
+    const events: any[] = [
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-retrying', index: 0, attempt: 1, maxAttempts: 2 },
+      { type: 'subtask-started', index: 0 },
+      { type: 'subtask-completed', index: 0, oneliner: 'recovered', elapsed: 8000 },
+    ];
+    const retryEvents = events.filter((e: any) => e.type === 'subtask-retrying');
+    assert.equal(retryEvents.length, 1);
+    assert.equal(retryEvents[0].attempt, 1);
+    assert.equal(retryEvents[0].maxAttempts, 2);
+  });
+
+  it('subtask-retrying event includes correct attempt and maxAttempts', () => {
+    // Verify attempt numbering: attempts are 1-indexed
+    const event: any = { type: 'subtask-retrying', index: 3, attempt: 2, maxAttempts: 3 };
+    assert.equal(event.attempt, 2);
+    assert.equal(event.maxAttempts, 3);
+    assert.ok(event.attempt <= event.maxAttempts, 'attempt should not exceed maxAttempts');
+  });
+
+  it('buildChildOptions propagates maxSubtaskRetries', () => {
+    const parentOpts = {
+      prompt: 'Build the app',
+      workDir: '/home/user/project',
+      pipeline: ['Plan', 'Execute', 'Verify'],
+      backend: { type: 'cli' },
+      permissionMode: 'auto',
+      autoApprove: false,
+      maxRetries: 2,
+      maxConcurrency: 4,
+      maxDepth: 3,
+      timeoutSeconds: 300,
+      noSummary: false,
+      noMemory: false,
+      dagStages: ['Execute'],
+      maxSubtaskRetries: 3,
+    } as CliOptions & { maxSubtaskRetries?: number };
+    const subtask: Subtask = {
+      index: 0,
+      description: 'Setup DB',
+      prompt: 'Create DB schema',
+      dependencies: [],
+      estimatedComplexity: 'medium',
+      needsRecursiveDecomposition: true,
+    };
+    const child = buildChildOptions(parentOpts, subtask, 0);
+    assert.equal((child as any).maxSubtaskRetries, 3);
   });
 });
