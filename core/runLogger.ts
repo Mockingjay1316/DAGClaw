@@ -254,6 +254,12 @@ ${prompt}
     return summaries;
   }
 
+  /** Write a memory.md file into the run directory. */
+  writeRunMemory(runId: string, content: string): void {
+    const memPath = path.join(this.runDir(runId), 'memory.md');
+    fs.writeFileSync(memPath, content);
+  }
+
   /** Clean the run-scoped tmp directory (called after initRun). */
   cleanTmp(): void {
     const tmpDir = this.tmpDir();

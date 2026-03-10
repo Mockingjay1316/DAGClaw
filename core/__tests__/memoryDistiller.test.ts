@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { PipelineState, CliOptions, Plan, ContextSnapshot } from '../types.ts';
 import type { MemoryManager } from '../memoryManager.ts';
 import type { RunLogger } from '../runLogger.ts';
-import { slugify, distillMemory } from '../memoryDistiller.ts';
+import { distillMemory } from '../memoryDistiller.ts';
 
 // Mock runner injected via dependency injection (no mock.module needed)
 const mockRunClaudeCli = mock.fn(async () => ({
@@ -18,13 +18,15 @@ const mockRunClaudeCli = mock.fn(async () => ({
   },
 }));
 
-function makeMockLogger(): RunLogger {
+function makeMockLogger(): RunLogger & { appendStageLog: ReturnType<typeof mock.fn>; writeRunMemory: ReturnType<typeof mock.fn> } {
   return {
     logEvent: mock.fn(() => {}),
     info: mock.fn(() => {}),
     warn: mock.fn(() => {}),
     error: mock.fn(() => {}),
-  } as unknown as RunLogger;
+    appendStageLog: mock.fn(() => {}),
+    writeRunMemory: mock.fn(() => {}),
+  } as unknown as RunLogger & { appendStageLog: ReturnType<typeof mock.fn>; writeRunMemory: ReturnType<typeof mock.fn> };
 }
 
 function makeMockMemoryManager(): MemoryManager & { writeFile: ReturnType<typeof mock.fn> } {
@@ -33,6 +35,8 @@ function makeMockMemoryManager(): MemoryManager & { writeFile: ReturnType<typeof
     readAll: mock.fn(() => ''),
     readFile: mock.fn(() => null),
     listFiles: mock.fn(() => []),
+    readSummaries: mock.fn(() => []),
+    updateIndex: mock.fn(() => {}),
   } as unknown as MemoryManager & { writeFile: ReturnType<typeof mock.fn> };
 }
 
@@ -132,26 +136,6 @@ describe('memoryDistiller', () => {
     mockRunClaudeCli.mock.resetCalls();
   });
 
-  describe('slugify', () => {
-    it('converts text to lowercase hyphenated slug', () => {
-      assert.equal(slugify('Add memory distillation pipeline'), 'add-memory-distillation-pipeline');
-    });
-
-    it('handles special characters', () => {
-      assert.equal(slugify('Fix bug #123 (urgent!)'), 'fix-bug-123-urgent');
-    });
-
-    it('truncates to 50 chars max', () => {
-      const longText = 'a'.repeat(60);
-      const result = slugify(longText);
-      assert.ok(result.length <= 50, `Expected length <= 50, got ${result.length}`);
-    });
-
-    it('handles empty string', () => {
-      assert.equal(slugify(''), 'untitled');
-    });
-  });
-
   describe('distillMemory', () => {
     it('builds correct prompt with plan and subtask details', async () => {
       const state = makeMockState();
@@ -185,7 +169,7 @@ describe('memoryDistiller', () => {
       );
     });
 
-    it('calls memoryManager.writeFile with slugified filename', async () => {
+    it('calls memoryManager.writeFile with runId as filename and clean text directly', async () => {
       const state = makeMockState();
       const logger = makeMockLogger();
       const memoryManager = makeMockMemoryManager();
@@ -195,7 +179,8 @@ describe('memoryDistiller', () => {
 
       assert.equal(memoryManager.writeFile.mock.callCount(), 1);
       const [filename, content] = memoryManager.writeFile.mock.calls[0].arguments;
-      assert.equal(filename, 'add-memory-distillation.md');
+      assert.equal(filename, 'run-123.md');
+      // Content is passed through directly from the distiller
       assert.equal(content, '# Memory\nSome insight');
     });
 
@@ -248,6 +233,86 @@ describe('memoryDistiller', () => {
 
       const callArgs = (mockRunClaudeCli.mock.calls as any)[0].arguments[0];
       assert.equal(callArgs.model, 'opus');
+    });
+
+    it('saves raw NDJSON output to run directory via logger.appendStageLog', async () => {
+      const state = makeMockState();
+      const logger = makeMockLogger();
+      const memoryManager = makeMockMemoryManager();
+      const opts = makeMockOpts();
+
+      await distillMemory('run-123', state, logger, memoryManager, opts, mockRunClaudeCli as any);
+
+      assert.equal(logger.appendStageLog.mock.callCount(), 1);
+      const [runId, stageName, data] = logger.appendStageLog.mock.calls[0].arguments;
+      assert.equal(runId, 'run-123');
+      assert.equal(stageName, 'memory-distillation');
+      assert.equal(data, '# Memory\nSome insight');
+    });
+
+    it('saves per-run memory.md via logger.writeRunMemory', async () => {
+      const state = makeMockState();
+      const logger = makeMockLogger();
+      const memoryManager = makeMockMemoryManager();
+      const opts = makeMockOpts();
+
+      await distillMemory('run-123', state, logger, memoryManager, opts, mockRunClaudeCli as any);
+
+      assert.equal(logger.writeRunMemory.mock.callCount(), 1);
+      const [runId, content] = logger.writeRunMemory.mock.calls[0].arguments;
+      assert.equal(runId, 'run-123');
+      assert.equal(content, '# Memory\nSome insight');
+    });
+
+    it('passes distiller output directly without modification', async () => {
+      const structuredRunner = mock.fn(async () => ({
+        rawOutput: '# Added REST API Routes\n\n> Implemented CRUD endpoints for tasks with Express router factory pattern.\n\n## Summary\n\nAdded four REST endpoints...',
+        sessionId: 'test-session',
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0, estimatedCost: 0.001 },
+      }));
+
+      const state = makeMockState();
+      const logger = makeMockLogger();
+      const memoryManager = makeMockMemoryManager();
+      const opts = makeMockOpts();
+
+      await distillMemory('run-123', state, logger, memoryManager, opts, structuredRunner as any);
+
+      const [, content] = memoryManager.writeFile.mock.calls[0].arguments;
+      // Content passed through directly — title, blockquote, and body intact
+      assert.ok(content.startsWith('# Added REST API Routes'));
+      assert.ok(content.includes('> Implemented CRUD'));
+      assert.ok(content.includes('## Summary'));
+    });
+
+    it('extracts clean text from NDJSON stream for memoryManager.writeFile', async () => {
+      const ndjsonOutput = '{"type":"system","subtype":"init"}\n{"type":"assistant","message":{"content":[{"type":"text","text":"# Distilled Memory\\nKey insight"}]}}\n{"type":"result","subtype":"success","result":"# Distilled Memory\\nKey insight"}';
+      const ndjsonRunner = mock.fn(async () => ({
+        rawOutput: ndjsonOutput,
+        sessionId: 'test-session',
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0, estimatedCost: 0.001 },
+      }));
+
+      const state = makeMockState();
+      const logger = makeMockLogger();
+      const memoryManager = makeMockMemoryManager();
+      const opts = makeMockOpts();
+
+      await distillMemory('run-123', state, logger, memoryManager, opts, ndjsonRunner as any);
+
+      // memoryManager.writeFile should receive the clean extracted text, not raw NDJSON
+      const [filename, content] = memoryManager.writeFile.mock.calls[0].arguments;
+      assert.equal(filename, 'run-123.md');
+      // Content already starts with # title, kept as-is
+      assert.equal(content, '# Distilled Memory\nKey insight');
+
+      // logger.appendStageLog should receive the raw NDJSON
+      const [, , rawData] = logger.appendStageLog.mock.calls[0].arguments;
+      assert.equal(rawData, ndjsonOutput);
+
+      // logger.writeRunMemory should receive clean text
+      const [, memContent] = logger.writeRunMemory.mock.calls[0].arguments;
+      assert.equal(memContent, '# Distilled Memory\nKey insight');
     });
   });
 });

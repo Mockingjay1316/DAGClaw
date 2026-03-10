@@ -224,6 +224,40 @@ export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaude
   });
 }
 
+/** Extract clean text content from NDJSON stream-json output. */
+export function extractTextFromStreamJson(rawOutput: string): string {
+  const lines = rawOutput.split('\n');
+  let resultText: string | undefined;
+  const assistantTexts: string[] = [];
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed.type === 'result' && typeof parsed.result === 'string') {
+        resultText = parsed.result;
+      }
+      if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+        for (const item of parsed.message.content) {
+          if (item.type === 'text' && typeof item.text === 'string') {
+            assistantTexts.push(item.text);
+          }
+        }
+      }
+    } catch { /* skip non-json lines */ }
+  }
+
+  if (resultText !== undefined) return stripMarkdownFence(resultText);
+  if (assistantTexts.length > 0) return stripMarkdownFence(assistantTexts.join(''));
+  return rawOutput;
+}
+
+/** Strip wrapping ```markdown ... ``` fences if present. */
+function stripMarkdownFence(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/);
+  return match ? match[1] : text;
+}
+
 function extractFirstLine(raw: string, maxLen: number): string {
   const line = raw.split('\n').find(l => l.trim().length > 0) ?? raw;
   return line.slice(0, maxLen);

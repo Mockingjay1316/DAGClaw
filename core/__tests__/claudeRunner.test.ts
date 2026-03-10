@@ -8,6 +8,7 @@ import {
   runClaudeCli,
   buildCliArgs,
   extractFailureFromRawOutput,
+  extractTextFromStreamJson,
 } from '../claudeRunner.ts';
 import type { RunClaudeOptions } from '../claudeRunner.ts';
 
@@ -223,6 +224,107 @@ describe('claudeRunner', () => {
         oneliner: 'Missing JSON output',
         retryWorthy: true,
       });
+    });
+  });
+
+  describe('extractTextFromStreamJson', () => {
+    it('extracts text from a result line with type result and result string', () => {
+      const ndjson = [
+        JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }),
+        JSON.stringify({ type: 'result', subtype: 'success', result: '# Hello World\n\nThis is the final output.' }),
+      ].join('\n');
+
+      const text = extractTextFromStreamJson(ndjson);
+      assert.equal(text, '# Hello World\n\nThis is the final output.');
+    });
+
+    it('extracts text from assistant message lines when no result line exists', () => {
+      const ndjson = [
+        JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }),
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'thinking', thinking: 'Let me think...' },
+              { type: 'text', text: 'First part. ' },
+              { type: 'text', text: 'Second part.' },
+            ],
+          },
+        }),
+      ].join('\n');
+
+      const text = extractTextFromStreamJson(ndjson);
+      assert.equal(text, 'First part. Second part.');
+    });
+
+    it('returns raw output when no JSON can be parsed', () => {
+      const raw = 'this is not json\nneither is this';
+      const text = extractTextFromStreamJson(raw);
+      assert.equal(text, raw);
+    });
+
+    it('handles mixed NDJSON with system, assistant, rate_limit, and result lines', () => {
+      const ndjson = [
+        JSON.stringify({ type: 'system', subtype: 'init', cwd: '/tmp', session_id: 'sess1' }),
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'thinking', thinking: 'hmm' },
+              { type: 'text', text: 'Some intermediate text' },
+            ],
+          },
+        }),
+        JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' } }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          result: '## Final Summary\n\nEverything worked.',
+          session_id: 'sess1',
+        }),
+      ].join('\n');
+
+      const text = extractTextFromStreamJson(ndjson);
+      // Should prefer the result field over assistant messages
+      assert.equal(text, '## Final Summary\n\nEverything worked.');
+    });
+
+    it('falls back to assistant text when result field is not a string', () => {
+      const ndjson = [
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: 'Only assistant text here' }],
+          },
+        }),
+        JSON.stringify({ type: 'result', subtype: 'success', result: { some: 'object' } }),
+      ].join('\n');
+
+      const text = extractTextFromStreamJson(ndjson);
+      assert.equal(text, 'Only assistant text here');
+    });
+
+    it('returns raw output for empty string', () => {
+      assert.equal(extractTextFromStreamJson(''), '');
+    });
+
+    it('strips wrapping markdown fences from result text', () => {
+      const ndjson = [
+        '{"type":"system","subtype":"init"}',
+        '{"type":"result","result":"```markdown\\n# Title\\n\\nContent here\\n```"}',
+      ].join('\n');
+
+      const text = extractTextFromStreamJson(ndjson);
+      assert.equal(text, '# Title\n\nContent here');
+    });
+
+    it('strips wrapping md fences from assistant text', () => {
+      const ndjson = [
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"```md\\n# Doc\\n\\nBody\\n```"}]}}',
+      ].join('\n');
+
+      const text = extractTextFromStreamJson(ndjson);
+      assert.equal(text, '# Doc\n\nBody');
     });
   });
 });

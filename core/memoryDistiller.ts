@@ -1,25 +1,7 @@
 import type { PipelineState, CliOptions } from './types.ts';
 import type { RunLogger } from './runLogger.ts';
 import type { MemoryManager } from './memoryManager.ts';
-import { runClaudeCli } from './claudeRunner.ts';
-
-/**
- * Convert text to a URL-safe slug.
- * Lowercase, replace non-alphanumeric with hyphens, collapse, trim, truncate to 50 chars.
- */
-export function slugify(text: string): string {
-  let slug = text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '');
-
-  if (slug.length > 50) {
-    slug = slug.slice(0, 50).replace(/-$/, '');
-  }
-
-  return slug || 'untitled';
-}
+import { runClaudeCli, extractTextFromStreamJson } from './claudeRunner.ts';
 
 /**
  * Build a prompt summarizing the run results for distillation.
@@ -53,8 +35,32 @@ function buildDistillationPrompt(state: PipelineState): string {
   return lines.join('\n');
 }
 
-const DISTILLATION_SYSTEM_PROMPT =
-  'You are a knowledge distiller. Given the results of a completed task, synthesize a concise markdown memory entry capturing: key patterns discovered, what worked well, gotchas encountered, and reusable insights. Be specific and actionable. Output ONLY the markdown content.';
+const DISTILLATION_SYSTEM_PROMPT = `You are a knowledge distiller. Given the results of a completed task, synthesize a structured markdown memory entry. Output ONLY the markdown content in this exact format:
+
+# <Human-readable title describing what was done>
+
+> <One-line summary (max 150 chars) capturing the core problem solved and key technique used. This line is used for index-based retrieval — make it precise and searchable.>
+
+## Summary
+
+<100-200 word narrative summary. Cover: what the task accomplished, the approach taken, key technical decisions, and outcome. Write in past tense. This section helps a model decide whether to read the full detailed memory below.>
+
+## Key Patterns
+
+<Specific, reusable patterns discovered. Use ### subheadings for distinct patterns. Include code snippets where they add clarity.>
+
+## Gotchas
+
+<Problems encountered and their solutions. Be specific about symptoms and fixes.>
+
+## Reusable Insights
+
+<Numbered list of actionable takeaways that apply beyond this specific task.>
+
+IMPORTANT:
+- The > blockquote line must be a single line, max 150 characters, no line breaks.
+- The Summary section must be 100-200 words — not a list of bullets, but a coherent paragraph.
+- Be specific and actionable throughout. Vague observations are useless.`;
 
 /**
  * Distill memory from a completed run. Non-fatal — errors are logged but not re-thrown.
@@ -81,8 +87,20 @@ export async function distillMemory(
       model: opts.distillModel ?? 'sonnet',
     });
 
-    const filename = `${slugify(state.plan!.summary)}.md`;
-    memoryManager.writeFile(filename, result.rawOutput);
+    const cleanText = extractTextFromStreamJson(result.rawOutput);
+
+    // Save raw NDJSON as ground truth to per-run directory
+    logger.appendStageLog(runId, 'memory-distillation', result.rawOutput);
+
+    // Save clean per-run memory
+    logger.writeRunMemory(runId, cleanText);
+
+    // Write to project memory with run ID filename
+    const filename = `${runId}.md`;
+    memoryManager.writeFile(filename, cleanText);
+
+    // Regenerate the memory index for progressive disclosure
+    memoryManager.updateIndex();
   } catch (err) {
     const msg = `Memory distillation failed: ${err instanceof Error ? err.message : String(err)}`;
     if (typeof (logger as any).warn === 'function') {
