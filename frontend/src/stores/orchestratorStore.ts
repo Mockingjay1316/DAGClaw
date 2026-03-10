@@ -5,6 +5,7 @@ import type {
   Plan,
   VerificationResult,
   WsMessage,
+  TimelineEvent,
 } from '../types.ts';
 
 // --- Subtask execution status ---
@@ -27,6 +28,7 @@ interface OrchestratorState {
   verifications: Map<string, VerificationResult>;
   subtaskStatuses: Map<string, Map<number, SubtaskStatus>>;
   stageInfo: Map<string, StageInfo>;
+  events: Map<string, TimelineEvent[]>;
 
   // Actions
   setRootTasks: (tasks: TaskSummary[]) => void;
@@ -52,6 +54,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   verifications: new Map(),
   subtaskStatuses: new Map(),
   stageInfo: new Map(),
+  events: new Map(),
 
   // Actions
   setRootTasks: (tasks) =>
@@ -132,10 +135,25 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   handleWsMessage: (msg) => {
     const store = get();
 
+    const pushEvent = (taskId: string, type: string, message: string, data?: unknown) => {
+      set((state) => {
+        const events = new Map(state.events);
+        const taskEvents = [...(events.get(taskId) ?? [])];
+        const event: TimelineEvent = { timestamp: Date.now(), type, taskId, message, data };
+        taskEvents.push(event);
+        if (taskEvents.length > 500) {
+          taskEvents.splice(0, taskEvents.length - 500);
+        }
+        events.set(taskId, taskEvents);
+        return { events };
+      });
+    };
+
     switch (msg.type) {
       case 'node_status':
         // Status log messages — don't change task status, just log for debugging
         console.log(`[${msg.taskId}] ${msg.message}`);
+        pushEvent(msg.taskId, msg.type, `${msg.message}`);
         break;
 
       case 'stage_start':
@@ -144,6 +162,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           stageInfo.set(msg.taskId, { currentStage: msg.stageName, status: 'running' });
           return { stageInfo };
         });
+        pushEvent(msg.taskId, msg.type, `Stage ${msg.stageName} started`);
         break;
 
       case 'stage_complete':
@@ -155,15 +174,19 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           }
           return { stageInfo };
         });
+        pushEvent(msg.taskId, msg.type, `Stage completed`);
         break;
 
       case 'subtask_start':
         store.setSubtaskStatus(msg.taskId, msg.index, 'running');
+        pushEvent(msg.taskId, msg.type, `Subtask ${msg.index} started`);
         break;
 
       case 'subtask_complete': {
         const status: SubtaskStatus = msg.error ? 'failed' : 'completed';
         store.setSubtaskStatus(msg.taskId, msg.index, status);
+        const elapsed = msg.elapsed ? ` in ${msg.elapsed}ms` : '';
+        pushEvent(msg.taskId, msg.type, `Subtask ${msg.index} ${msg.error ? 'failed' : 'completed'}${elapsed}`);
         break;
       }
 
@@ -183,6 +206,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           }
           return { nodeMap };
         });
+        pushEvent(msg.taskId, msg.type, `Plan approval required`);
         break;
 
       case 'approval_resolved':
@@ -200,10 +224,12 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           }
           return { nodeMap };
         });
+        pushEvent(msg.taskId, msg.type, `Plan ${msg.approved ? 'approved' : 'rejected'}`);
         break;
 
       case 'plan_ready':
         store.setPlan(msg.taskId, msg.plan);
+        pushEvent(msg.taskId, msg.type, `Plan ready (${msg.plan.subtasks.length} subtasks)`);
         break;
 
       case 'task_error':
@@ -216,19 +242,29 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           }
           return { nodeMap };
         });
+        pushEvent(msg.taskId, msg.type, `Task error: ${msg.error}`);
         break;
 
       case 'task_complete':
         store.updateTaskStatus(msg.taskId, 'completed');
+        pushEvent(msg.taskId, msg.type, `Task completed`);
         break;
 
       case 'verification_result':
         store.setVerification(msg.taskId, msg.result);
+        pushEvent(msg.taskId, msg.type, `Verification ${msg.result.overallPass ? 'passed' : 'failed'}`);
         break;
 
-      // Other message types (tree_snapshot, node_created, subtask_output, retry) can be
-      // handled by consumers or extended here as needed.
+      case 'tree_snapshot':
+        pushEvent(msg.taskId, msg.type, `DAG snapshot: ${msg.subtasks.length} subtasks`);
+        break;
+
+      case 'retry':
+        pushEvent(msg.taskId, msg.type, `Retrying subtasks: ${msg.indices.join(', ')}`);
+        break;
+
       default:
+        pushEvent(msg.taskId, msg.type, msg.type);
         break;
     }
   },
@@ -269,3 +305,9 @@ export const selectStageInfoForTask = (taskId: string) =>
 export const selectSubtaskStatusesForTask = (taskId: string) =>
   (state: OrchestratorState): Map<number, SubtaskStatus> | undefined =>
     state.subtaskStatuses.get(taskId);
+
+export const selectEvents = (state: OrchestratorState) => state.events;
+export const selectEventsForSelectedTask = (state: OrchestratorState): TimelineEvent[] => {
+  const { selectedNodeId, events } = state;
+  return selectedNodeId ? events.get(selectedNodeId) ?? [] : [];
+};

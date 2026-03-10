@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 import { PlanView } from './PlanView.tsx';
 import { ApprovalBanner } from './ApprovalBanner.tsx';
 import { ExecutionView } from './ExecutionView.tsx';
 import { VerifyView } from './VerifyView.tsx';
 import { StageIndicator } from './StageIndicator.tsx';
+import { ActivityTimeline } from './ActivityTimeline.tsx';
 
 export function DetailPanel() {
   const selectedNodeId = useOrchestratorStore((state) => state.selectedNodeId);
@@ -19,6 +21,11 @@ export function DetailPanel() {
   const stageInfo = useOrchestratorStore((state) =>
     state.selectedNodeId ? state.stageInfo.get(state.selectedNodeId) : undefined
   );
+  const eventCount = useOrchestratorStore((state) =>
+    state.selectedNodeId ? (state.events.get(state.selectedNodeId)?.length ?? 0) : 0
+  );
+
+  const [activityOpen, setActivityOpen] = useState(false);
 
   if (!selectedNodeId) {
     return (
@@ -110,6 +117,29 @@ export function DetailPanel() {
       <div className="flex-1 overflow-y-auto p-4">
         {renderContent()}
       </div>
+
+      {/* Activity Timeline */}
+      {selectedNodeId && eventCount > 0 && (
+        <div className="border-t border-gray-800 shrink-0">
+          <button
+            onClick={() => setActivityOpen(!activityOpen)}
+            className="w-full px-4 py-2 flex items-center justify-between text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <span className={`transform transition-transform ${activityOpen ? 'rotate-90' : ''}`}>▶</span>
+              Activity
+            </span>
+            <span className="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded-full">
+              {eventCount}
+            </span>
+          </button>
+          {activityOpen && (
+            <div className="px-4 pb-3">
+              <ActivityTimeline taskId={selectedNodeId} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Approval banner */}
       {hasPendingApproval && task?.pendingApprovalMessage && (

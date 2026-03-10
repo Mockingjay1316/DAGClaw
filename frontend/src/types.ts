@@ -80,6 +80,16 @@ export interface VerificationResult {
   integrationResult: IntegrationResult;
 }
 
+// --- Timeline ---
+
+export interface TimelineEvent {
+  timestamp: number;
+  type: string;
+  taskId: string;
+  message: string;
+  data?: unknown;
+}
+
 // --- Server → Client WebSocket Messages ---
 
 export type WsMessage =
