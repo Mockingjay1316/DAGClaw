@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   CliOptions,
@@ -17,12 +17,13 @@ import type {
   StageDefinition,
   UsageStats,
 } from './types.ts';
+import { SubtaskError } from './types.ts';
 import { DependencyResolver } from './dependencyResolver.ts';
 import { getStageDefinition, formatStageDescriptions } from './stageDefinitions.ts';
 import { RunLogger } from './runLogger.ts';
 import { MemoryManager } from './memoryManager.ts';
 import { acquireLock, releaseLock, checkStaleLock } from './taskManager.ts';
-import { buildStagePrompt, checkClaudeCli, runClaudeCli, parseStageOutputFile, ClaudeRunError } from './claudeRunner.ts';
+import { buildStagePrompt, checkClaudeCli, runClaudeCli, parseStageOutputFile, ClaudeRunError, extractFailureFromRawOutput } from './claudeRunner.ts';
 
 // --- Pure utility functions (exported for testing) ---
 
@@ -88,6 +89,7 @@ export function buildChildOptions(parentOpts: CliOptions, subtask: Subtask, curr
     dagStages: parentOpts.dagStages,
     model: parentOpts.model,
     dagModel: parentOpts.dagModel,
+    maxSubtaskRetries: parentOpts.maxSubtaskRetries,
   };
 }
 
@@ -117,6 +119,25 @@ export function resolveModel(
   globalModel: string | undefined,
 ): string | undefined {
   return stageModel ?? (isParallel ? dagModel : undefined) ?? globalModel;
+}
+
+/**
+ * Determine if a subtask failure is worth retrying.
+ * Checks both the executor output (retryWorthy field) and the error type.
+ * ClaudeRunError (transient CLI/process failure) always takes precedence.
+ */
+export function isRetryWorthy(output: unknown, err: unknown): boolean {
+  // ClaudeRunError = transient CLI/process failure, always retryable
+  if (err instanceof ClaudeRunError) return true;
+  // Also check by name for duck-typing compatibility
+  if (err instanceof Error && err.name === 'ClaudeRunError') return true;
+
+  // Check executor output's retryWorthy flag
+  if (output && typeof output === 'object' && 'retryWorthy' in output) {
+    return !!(output as { retryWorthy?: boolean }).retryWorthy;
+  }
+
+  return false;
 }
 
 // --- Orchestrator callbacks ---
@@ -323,9 +344,23 @@ export class TaskOrchestrator {
     }
 
     // Validate structured output via declared schema
-    const parsedOutput = stage.outputSchema
+    let parsedOutput = stage.outputSchema
       ? parseStageOutputFile(stage.outputSchema, outputFile)
       : null;
+
+    // Fallback: if JSON parse failed, try to detect failure patterns from raw output
+    // and write a synthetic failure JSON so downstream handlers get structured data
+    if (stage.outputSchema && !parsedOutput && result.rawOutput) {
+      const fallback = extractFailureFromRawOutput(result.rawOutput);
+      if (fallback) {
+        try {
+          writeFileSync(outputFile, JSON.stringify(fallback, null, 2));
+          parsedOutput = stage.outputSchema.parse(fallback);
+        } catch {
+          // Fallback itself didn't match schema — let parsedOutput remain null
+        }
+      }
+    }
 
     return stage.resultHandler(state, parsedOutput, subtask, result.sessionId);
   }
@@ -412,7 +447,7 @@ export class TaskOrchestrator {
     this.emitDAG({ type: 'dag-complete' });
   }
 
-  /** Execute a single subtask (used by greedy DAG scheduler). */
+  /** Execute a single subtask with per-subtask retry logic (used by greedy DAG scheduler). */
   private async executeSubtask(
     runId: string,
     idx: number,
@@ -426,10 +461,57 @@ export class TaskOrchestrator {
       ? getStageDefinition(subtask.stage, this.stageRegistry)
       : stage;
 
-    if (shouldRecurse(idx, state.plan!)) {
-      return this.runRecursive(runId, effectiveStage, state, subtask);
+    const maxAttempts = (this.opts.maxSubtaskRetries ?? 1) + 1; // default 1 retry = 2 attempts
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (shouldRecurse(idx, state.plan!)) {
+          return await this.runRecursive(runId, effectiveStage, state, subtask);
+        }
+        return await this.runOne(runId, effectiveStage, state, subtask);
+      } catch (err) {
+        const isLastAttempt = attempt >= maxAttempts;
+        const isRetryable = this.isRetryableError(err);
+
+        if (isRetryable && !isLastAttempt) {
+          this.emitDAG({
+            type: 'subtask-retrying',
+            index: idx,
+            attempt: attempt + 1,
+            maxAttempts,
+          });
+          continue; // retry
+        }
+
+        // Not retryable or budget exhausted
+        if (attempt > 1) {
+          // We did retry at least once
+          this.emitDAG({
+            type: 'subtask-retry-exhausted',
+            index: idx,
+            attempts: attempt,
+          });
+        }
+        throw err; // let runDAG's catch handle cascade-skip
+      }
     }
-    return this.runOne(runId, effectiveStage, state, subtask);
+
+    // Should never reach here, but satisfy TypeScript
+    throw new Error(`Subtask ${idx} failed after ${maxAttempts} attempts`);
+  }
+
+  /** Determine if an error from subtask execution is worth retrying. */
+  private isRetryableError(err: unknown): boolean {
+    // ClaudeRunError = transient CLI/process failure, always retryable
+    if (err instanceof ClaudeRunError) return true;
+
+    // SubtaskError carries retryWorthy metadata from executor output
+    if (err instanceof SubtaskError) return err.retryWorthy;
+
+    // Fallback: check by error name for duck-typing compatibility
+    if (err instanceof Error && err.name === 'ClaudeRunError') return true;
+
+    return false;
   }
 
   /** Recursively decompose a subtask by spawning a child orchestrator. */
@@ -500,21 +582,40 @@ export class TaskOrchestrator {
       }
 
       const failedIndices = interpreted.failedIndices ?? [];
-      this.logStageFailure(stage.name, state, failedIndices);
+
+      // Also include cascade-skipped subtasks whose direct dependencies are now complete
+      // (they were skipped because a predecessor failed, but after retry the predecessor might succeed)
+      const skippedForRetry = Array.from(state.skippedIndices).filter(idx => {
+        // Only include if not already in failedIndices
+        if (failedIndices.includes(idx)) return false;
+        // Check if this subtask exists in the plan
+        const subtask = state.plan?.subtasks.find(s => s.index === idx);
+        if (!subtask) return false;
+        // Include it — the retry mechanism will re-execute and dependencies will be checked
+        return true;
+      });
+
+      const allRetryIndices = [...failedIndices, ...skippedForRetry];
+      this.logStageFailure(stage.name, state, allRetryIndices);
 
       // No retryStage configured or no retryable indices — fail immediately
-      if (!stage.retryStage || failedIndices.length === 0 || attempt >= maxRetries) {
-        if (attempt >= maxRetries && failedIndices.length > 0) {
+      if (!stage.retryStage || allRetryIndices.length === 0 || attempt >= maxRetries) {
+        if (attempt >= maxRetries && allRetryIndices.length > 0) {
           this.status(`[${stage.name}] Max retries (${maxRetries}) reached.`);
         }
         return false;
       }
 
-      // Re-run the configured retry stage for failed indices only
-      this.status(`[${stage.name}] Re-executing ${failedIndices.length} subtask(s) via ${stage.retryStage} (attempt ${attempt + 1}/${maxRetries})...`);
+      // Clear retried skipped indices so they can be re-executed
+      for (const idx of skippedForRetry) {
+        state.skippedIndices.delete(idx);
+      }
+
+      // Re-run the configured retry stage for failed + skipped indices
+      this.status(`[${stage.name}] Re-executing ${allRetryIndices.length} subtask(s) via ${stage.retryStage} (attempt ${attempt + 1}/${maxRetries})...`);
       const retryStage = getStageDefinition(stage.retryStage, this.stageRegistry);
       const allSubtasks = retryStage.subtaskExtractor?.(state) ?? [];
-      const retrySubtasks = allSubtasks.filter(s => failedIndices.includes(s.index));
+      const retrySubtasks = allSubtasks.filter(s => allRetryIndices.includes(s.index));
 
       for (const subtask of retrySubtasks) {
         if (this.isShuttingDown) return false;
@@ -534,8 +635,10 @@ export class TaskOrchestrator {
   }
 
   private logStageFailure(stageName: string, state: PipelineState, failedIndices: number[]): void {
-    this.status(`[${stageName}] Failed.`);
     const v = state.verification;
+    const failedCount = v ? v.subtaskResults.filter(s => !s.pass).length : 0;
+    const skippedCount = state.skippedIndices.size;
+    this.status(`[${stageName}] Failed: ${failedCount} subtask(s) failed, ${skippedCount} skipped.`);
     if (!v) return;
     for (const sr of v.subtaskResults) {
       if (!sr.pass) {
@@ -548,6 +651,10 @@ export class TaskOrchestrator {
       for (const issue of v.integrationResult.issues) {
         this.status(`[${stageName}]   - ${issue}`);
       }
+    }
+    // Log skipped subtasks
+    if (state.skippedIndices.size > 0) {
+      this.status(`[${stageName}] Skipped subtasks (cascade): ${Array.from(state.skippedIndices).join(', ')}`);
     }
   }
 

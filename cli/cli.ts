@@ -26,6 +26,7 @@ const DEFAULTS = {
   maxDepth: 3,
   timeoutSeconds: 300,
   dagStages: ['Execute'],
+  maxSubtaskRetries: 1,
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -58,6 +59,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.autoApprove = true;
     } else if (arg === '--no-memory') {
       flags.noMemory = true;
+    } else if (arg === '--max-subtask-retries') {
+      flags.maxSubtaskRetries = args[++i] ?? '';
     } else if (arg === '--no-summary') {
       flags.noSummary = true;
     } else if (arg === '--last') {
@@ -88,6 +91,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       noSummary: false,
       noMemory: false,
       dagStages: DEFAULTS.dagStages,
+      maxSubtaskRetries: DEFAULTS.maxSubtaskRetries,
     };
   }
 
@@ -130,6 +134,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     dagStages: flags.dagStages
       ? (flags.dagStages as string).split(',').map(s => s.trim())
       : DEFAULTS.dagStages,
+    maxSubtaskRetries: flags.maxSubtaskRetries
+      ? parseInt(flags.maxSubtaskRetries as string, 10)
+      : DEFAULTS.maxSubtaskRetries,
     model: flags.model ? (flags.model as string) : undefined,
     dagModel: flags.dagModel ? (flags.dagModel as string) : undefined,
   };

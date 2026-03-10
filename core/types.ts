@@ -92,9 +92,22 @@ export const ExecutorOutputSchema = z.object({
   success: z.boolean(),
   summary: z.string(),
   oneliner: z.string(),
+  retryWorthy: z.boolean().optional(),
 });
 
 export type ExecutorOutput = z.infer<typeof ExecutorOutputSchema>;
+
+// --- Subtask Error (used by retry logic) ---
+
+/** Error thrown when a subtask execution fails, carrying retryWorthy metadata. */
+export class SubtaskError extends Error {
+  public readonly retryWorthy: boolean;
+  constructor(message: string, retryWorthy: boolean) {
+    super(message);
+    this.name = 'SubtaskError';
+    this.retryWorthy = retryWorthy;
+  }
+}
 
 // --- Custom Stage Config (dagclaw.config.json) ---
 
@@ -264,6 +277,8 @@ export type DAGEvent =
   | { type: 'subtask-completed'; index: number; oneliner: string; elapsed: number }
   | { type: 'subtask-failed'; index: number; error: string; elapsed: number }
   | { type: 'subtask-skipped'; index: number; cascadeFrom: number }
+  | { type: 'subtask-retrying'; index: number; attempt: number; maxAttempts: number }
+  | { type: 'subtask-retry-exhausted'; index: number; attempts: number }
   | { type: 'dag-complete' };
 
 // --- CLI Options ---
@@ -282,6 +297,7 @@ export interface CliOptions {
   noSummary: boolean;
   noMemory: boolean;
   dagStages: string[];
+  maxSubtaskRetries?: number;
   model?: string;
   dagModel?: string;
 }

@@ -223,3 +223,66 @@ export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaude
     });
   });
 }
+
+function extractFirstLine(raw: string, maxLen: number): string {
+  const line = raw.split('\n').find(l => l.trim().length > 0) ?? raw;
+  return line.slice(0, maxLen);
+}
+
+/** Detect common failure patterns from raw output when JSON is missing/invalid. */
+export function extractFailureFromRawOutput(raw: string | null | undefined): {
+  success: boolean;
+  summary: string;
+  oneliner: string;
+  retryWorthy: boolean;
+} | null {
+  if (!raw || raw.trim().length === 0) {
+    return {
+      success: false,
+      summary: 'No output from executor',
+      oneliner: 'No output',
+      retryWorthy: true,
+    };
+  }
+
+  const lower = raw.toLowerCase();
+
+  // Non-retryable patterns
+  if (lower.includes('permission denied')) {
+    return {
+      success: false,
+      summary: `Permission denied: ${extractFirstLine(raw, 200)}`,
+      oneliner: 'Permission denied',
+      retryWorthy: false,
+    };
+  }
+
+  // Retryable transient patterns
+  if (lower.includes('sigterm') || lower.includes('timeout') || lower.includes('timed out')) {
+    return {
+      success: false,
+      summary: `Process terminated: ${extractFirstLine(raw, 200)}`,
+      oneliner: 'Process timeout/kill',
+      retryWorthy: true,
+    };
+  }
+
+  // Generic error patterns
+  const errorMatch = raw.match(/(?:Error|ERROR|error):\s*(.{1,200})/);
+  if (errorMatch) {
+    return {
+      success: false,
+      summary: errorMatch[1].trim(),
+      oneliner: errorMatch[1].trim().slice(0, 80),
+      retryWorthy: true,
+    };
+  }
+
+  // Fallback: output exists but no JSON was produced
+  return {
+    success: false,
+    summary: 'Executor did not produce structured output',
+    oneliner: 'Missing JSON output',
+    retryWorthy: true,
+  };
+}

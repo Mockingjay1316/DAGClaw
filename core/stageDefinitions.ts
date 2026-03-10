@@ -15,6 +15,7 @@ import {
   PlanSchema,
   ExecutorOutputSchema,
   VerificationResultSchema,
+  SubtaskError,
 } from './types.ts';
 import { detectCircularDependencies } from './dependencyResolver.ts';
 
@@ -150,10 +151,14 @@ When you are done, write a JSON summary to the output file path provided in your
 {
   "success": true,
   "summary": "paragraph describing what you did and key decisions made",
-  "oneliner": "one-line description of the change"
+  "oneliner": "one-line description of the change",
+  "retryWorthy": false
 }
 
-Set "success" to false if you could not complete the task (e.g., permission denied, missing prerequisites, impossible constraints). Always write the output file even on failure — describe what went wrong in the summary.`;
+Set "success" to false if you could not complete the task. When success is false:
+- Set "retryWorthy" to true if the failure is transient (network error, flaky test, timeout, rate limit). The orchestrator will retry the subtask.
+- Set "retryWorthy" to false or omit it if the failure is permanent (missing prerequisite, permission denied, impossible constraints).
+Always write the output file even on failure — describe what went wrong in the summary.`;
 
 const EXECUTE_PROMPT_TEMPLATE = `Working directory: {{workDir}}
 
@@ -316,12 +321,22 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
     },
 
     resultHandler: (state, parsedOutput, subtask, sessionId) => {
-      const output = parsedOutput as { success: boolean; summary: string; oneliner: string } | null;
+      const output = parsedOutput as { success: boolean; summary: string; oneliner: string; retryWorthy?: boolean } | null;
       const idx = subtask?.index ?? 0;
+
+      if (!output) {
+        throw new SubtaskError(
+          `Subtask ${idx} failed: executor did not produce valid output`,
+          true, // retryWorthy — JSON parse failures are typically transient
+        );
+      }
 
       // Signal failure so DAG runner can cascade-skip dependents
       if (output && !output.success) {
-        throw new Error(`Subtask ${idx} failed: ${output.summary}`);
+        throw new SubtaskError(
+          `Subtask ${idx} failed: ${output.summary}`,
+          !!output.retryWorthy,
+        );
       }
 
       const snap = {
@@ -416,12 +431,22 @@ export function verifyResultInterpreter(output: unknown): {
   failedIndices: number[];
 } {
   const r = output as VerificationResult;
-  const failedIndices = r.subtaskResults
-    .filter((s) => !s.pass && s.retryRecommended)
+  const failedSubtasks = r.subtaskResults.filter((s) => !s.pass);
+  const retryableIndices = failedSubtasks
+    .filter((s) => s.retryRecommended)
     .map((s) => s.subtaskIndex);
 
+  // Skipped subtasks should be treated as failures needing retry
+  const skippedIndices = r.skippedIndices ?? [];
+
+  // Override overallPass: if ANY subtask failed or was skipped, the stage fails
+  const allSubtasksPassed = failedSubtasks.length === 0;
+  const noneSkipped = skippedIndices.length === 0;
+  const integrationPassed = r.integrationResult.pass;
+  const pass = allSubtasksPassed && noneSkipped && integrationPassed;
+
   return {
-    pass: r.overallPass,
-    failedIndices,
+    pass,
+    failedIndices: [...retryableIndices, ...skippedIndices],
   };
 }

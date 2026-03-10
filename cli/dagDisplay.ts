@@ -52,6 +52,8 @@ interface DisplayEntry {
   result?: string;
   dependencies: number[];
   cascadeFrom?: number;
+  retryAttempt?: number;
+  retryMax?: number;
 }
 
 export class DagDisplay {
@@ -134,6 +136,29 @@ export class DagDisplay {
           entry.cascadeFrom = event.cascadeFrom;
         }
         this.render();
+        break;
+      }
+
+      case 'subtask-retrying': {
+        const entry = this.entries.get(event.index);
+        if (entry) {
+          entry.state = 'running'; // stays running
+          entry.retryAttempt = event.attempt;
+          entry.retryMax = event.maxAttempts;
+          entry.startTime = Date.now(); // reset timer for new attempt
+        }
+        this.render();
+        break;
+      }
+
+      case 'subtask-retry-exhausted': {
+        // The subtask-failed event will follow from runDAG's catch,
+        // so we just update retry info here for display purposes.
+        const entry = this.entries.get(event.index);
+        if (entry) {
+          entry.retryAttempt = event.attempts;
+        }
+        // Don't render here — subtask-failed will follow and render
         break;
       }
 
@@ -357,13 +382,16 @@ export class DagDisplay {
     switch (entry.state) {
       case 'completed':
         return `${tag} ${idx} ${desc} -- done (${formatElapsed(entry.elapsed ?? 0)})`;
-      case 'failed':
-        return `${tag} ${idx} ${desc} -- FAILED (${formatElapsed(entry.elapsed ?? 0)})`;
+      case 'failed': {
+        const retryInfo = entry.retryAttempt ? ` after ${entry.retryAttempt} attempts` : '';
+        return `${tag} ${idx} ${desc} -- FAILED${retryInfo} (${formatElapsed(entry.elapsed ?? 0)})`;
+      }
       case 'skipped':
         return `${tag} ${idx} ${desc} -- skipped (cascade from ${entry.cascadeFrom})`;
       case 'running': {
         const elapsed = entry.startTime ? Date.now() - entry.startTime : 0;
-        return `${tag} ${idx} ${desc} -- running... (${formatElapsed(elapsed)})`;
+        const retryInfo = entry.retryAttempt ? ` retrying (attempt ${entry.retryAttempt}/${entry.retryMax})` : '';
+        return `${tag} ${idx} ${desc} -- running...${retryInfo} (${formatElapsed(elapsed)})`;
       }
       case 'waiting':
         return `${tag} ${idx} ${desc} -- waiting`;
