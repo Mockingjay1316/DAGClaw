@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 import { PlanView } from './PlanView.tsx';
 import { ApprovalBanner } from './ApprovalBanner.tsx';
@@ -6,6 +6,7 @@ import { ExecutionView } from './ExecutionView.tsx';
 import { VerifyView } from './VerifyView.tsx';
 import { StageIndicator } from './StageIndicator.tsx';
 import { ActivityTimeline } from './ActivityTimeline.tsx';
+import { CostDisplay } from './CostDisplay.tsx';
 
 export function DetailPanel() {
   const selectedNodeId = useOrchestratorStore((state) => state.selectedNodeId);
@@ -24,8 +25,18 @@ export function DetailPanel() {
   const eventCount = useOrchestratorStore((state) =>
     state.selectedNodeId ? (state.events.get(state.selectedNodeId)?.length ?? 0) : 0
   );
+  const usage = useOrchestratorStore((state) =>
+    state.selectedNodeId ? state.usage.get(state.selectedNodeId) : undefined
+  );
+  const fetchUsage = useOrchestratorStore((state) => state.fetchUsage);
 
   const [activityOpen, setActivityOpen] = useState(false);
+
+  useEffect(() => {
+    if (selectedNodeId && task?.status === 'completed' && !usage) {
+      fetchUsage(selectedNodeId);
+    }
+  }, [selectedNodeId, task?.status, usage, fetchUsage]);
 
   if (!selectedNodeId) {
     return (
@@ -101,6 +112,11 @@ export function DetailPanel() {
                 currentStage={stageInfo.currentStage}
                 status={taskStatus === 'completed' ? 'completed' : taskStatus === 'failed' ? 'failed' : stageInfo.status}
               />
+            </div>
+          )}
+          {selectedNodeId && (
+            <div className="ml-auto">
+              <CostDisplay taskId={selectedNodeId} />
             </div>
           )}
         </div>

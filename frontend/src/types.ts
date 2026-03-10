@@ -90,6 +90,25 @@ export interface TimelineEvent {
   data?: unknown;
 }
 
+// --- Usage ---
+
+export interface StageUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  estimatedCost: number;
+}
+
+export interface UsageData {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  estimatedCost: number;
+  perStage: Record<string, StageUsage>;
+  perSubtask: Record<string, StageUsage>;
+}
+
 // --- Server → Client WebSocket Messages ---
 
 export type WsMessage =

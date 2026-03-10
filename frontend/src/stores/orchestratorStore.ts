@@ -6,6 +6,7 @@ import type {
   VerificationResult,
   WsMessage,
   TimelineEvent,
+  UsageData,
 } from '../types.ts';
 
 // --- Subtask execution status ---
@@ -29,6 +30,7 @@ interface OrchestratorState {
   subtaskStatuses: Map<string, Map<number, SubtaskStatus>>;
   stageInfo: Map<string, StageInfo>;
   events: Map<string, TimelineEvent[]>;
+  usage: Map<string, UsageData>;
 
   // Actions
   setRootTasks: (tasks: TaskSummary[]) => void;
@@ -41,6 +43,7 @@ interface OrchestratorState {
   setVerification: (taskId: string, result: VerificationResult) => void;
   setSubtaskStatus: (taskId: string, index: number, status: SubtaskStatus) => void;
   handleWsMessage: (msg: WsMessage) => void;
+  fetchUsage: (taskId: string) => Promise<void>;
 }
 
 export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
@@ -55,6 +58,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   subtaskStatuses: new Map(),
   stageInfo: new Map(),
   events: new Map(),
+  usage: new Map(),
 
   // Actions
   setRootTasks: (tasks) =>
@@ -263,9 +267,34 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         pushEvent(msg.taskId, msg.type, `Retrying subtasks: ${msg.indices.join(', ')}`);
         break;
 
+      case 'usage_update':
+        set((state) => {
+          const usage = new Map(state.usage);
+          usage.set(msg.taskId, msg.usage as UsageData);
+          return { usage };
+        });
+        break;
+
       default:
         pushEvent(msg.taskId, msg.type, msg.type);
         break;
+    }
+  },
+
+  fetchUsage: async (taskId: string) => {
+    try {
+      const resp = await fetch(`/api/tasks/${taskId}/usage`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data.usage) {
+        set((state) => {
+          const usage = new Map(state.usage);
+          usage.set(taskId, data.usage as UsageData);
+          return { usage };
+        });
+      }
+    } catch {
+      // Silently ignore fetch errors for usage
     }
   },
 }));
@@ -305,6 +334,11 @@ export const selectStageInfoForTask = (taskId: string) =>
 export const selectSubtaskStatusesForTask = (taskId: string) =>
   (state: OrchestratorState): Map<number, SubtaskStatus> | undefined =>
     state.subtaskStatuses.get(taskId);
+
+export const selectUsage = (state: OrchestratorState) => state.usage;
+export const selectUsageForTask = (taskId: string) =>
+  (state: OrchestratorState): UsageData | undefined =>
+    state.usage.get(taskId);
 
 export const selectEvents = (state: OrchestratorState) => state.events;
 export const selectEventsForSelectedTask = (state: OrchestratorState): TimelineEvent[] => {

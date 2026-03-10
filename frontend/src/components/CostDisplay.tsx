@@ -1,0 +1,63 @@
+import { useState } from 'react';
+import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
+import type { UsageData } from '../types.ts';
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatCost(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+export function CostDisplay({ taskId }: { taskId: string }) {
+  const usage = useOrchestratorStore((state) => state.usage.get(taskId));
+  const [expanded, setExpanded] = useState(false);
+
+  if (!usage) return <span className="text-sm text-gray-500">—</span>;
+
+  const stageEntries = Object.entries(usage.perStage);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-green-400 font-medium">{formatCost(usage.estimatedCost)}</span>
+        <span className="text-gray-500">|</span>
+        <span className="text-gray-300">
+          {formatTokens(usage.totalInputTokens)} in / {formatTokens(usage.totalOutputTokens)} out
+        </span>
+        {stageEntries.length > 0 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-gray-500 hover:text-gray-300 ml-1"
+          >
+            {expanded ? '▼' : '▶'}
+          </button>
+        )}
+      </div>
+      {expanded && stageEntries.length > 0 && (
+        <table className="mt-2 text-xs text-gray-400 w-full">
+          <thead>
+            <tr className="border-b border-gray-700">
+              <th className="text-left py-1 pr-3 font-medium">Stage</th>
+              <th className="text-right py-1 px-2 font-medium">Cost</th>
+              <th className="text-right py-1 px-2 font-medium">In</th>
+              <th className="text-right py-1 px-2 font-medium">Out</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stageEntries.map(([stage, data]) => (
+              <tr key={stage} className="border-b border-gray-700/50">
+                <td className="py-1 pr-3 text-gray-300 capitalize">{stage}</td>
+                <td className="text-right py-1 px-2">{formatCost(data.estimatedCost)}</td>
+                <td className="text-right py-1 px-2">{formatTokens(data.inputTokens)}</td>
+                <td className="text-right py-1 px-2">{formatTokens(data.outputTokens)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
