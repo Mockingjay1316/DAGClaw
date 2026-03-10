@@ -24,6 +24,7 @@ import { RunLogger } from './runLogger.ts';
 import { MemoryManager } from './memoryManager.ts';
 import { acquireLock, releaseLock, checkStaleLock } from './taskManager.ts';
 import { buildStagePrompt, checkClaudeCli, runClaudeCli, parseStageOutputFile, ClaudeRunError, extractFailureFromRawOutput } from './claudeRunner.ts';
+import { distillMemory } from './memoryDistiller.ts';
 
 // --- Pure utility functions (exported for testing) ---
 
@@ -259,6 +260,13 @@ export class TaskOrchestrator {
 
       this.logger.updateManifestStatus(runId, 'completed');
       if (!this.opts.noSummary) this.printCostSummary(runId);
+      if (state.plan?.worthDistilling && !this.opts.noMemory) {
+        try {
+          await distillMemory(runId, state, this.logger, this.memory, this.opts);
+        } catch (e: any) {
+          console.warn('Memory distillation failed (non-fatal):', e.message);
+        }
+      }
       return { runId, success: true };
     } catch (err) {
       this.logger.updateManifestStatus(runId, 'failed');

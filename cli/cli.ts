@@ -53,6 +53,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.model = args[++i] ?? '';
     } else if (arg === '--dag-model') {
       flags.dagModel = args[++i] ?? '';
+    } else if (arg === '--distill-model') {
+      flags.distillModel = args[++i] ?? '';
     } else if (arg === '--yolo') {
       flags.yolo = true;
     } else if (arg === '--auto-approve' || arg === '--auto-execute') {
@@ -139,6 +141,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       : DEFAULTS.maxSubtaskRetries,
     model: flags.model ? (flags.model as string) : undefined,
     dagModel: flags.dagModel ? (flags.dagModel as string) : undefined,
+    distillModel: flags.distillModel ? (flags.distillModel as string) : undefined,
   };
 }
 

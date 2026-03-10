@@ -300,4 +300,5 @@ export interface CliOptions {
   maxSubtaskRetries?: number;
   model?: string;
   dagModel?: string;
+  distillModel?: string;
 }
