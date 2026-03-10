@@ -31,7 +31,7 @@ export function visibleLength(str: string): number {
 }
 
 /** Max visible characters for subtask descriptions in display output. */
-const DESC_MAX_LEN = 40;
+const DESC_MAX_LEN = 80;
 
 /**
  * Truncate a plain text description to maxLen visible characters.

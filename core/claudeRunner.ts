@@ -127,6 +127,7 @@ export interface RunClaudeOptions {
   timeoutMs?: number;
   backend: RunnerBackend;
   dangerouslySkipPermissions?: boolean;
+  model?: string;
 }
 
 export interface RunClaudeResult {
@@ -135,8 +136,8 @@ export interface RunClaudeResult {
   usage: UsageStats;
 }
 
-/** Spawn `claude -p` and collect output. */
-export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaudeResult> {
+/** Build the CLI args array from options (exported for testing). */
+export function buildCliArgs(options: RunClaudeOptions): string[] {
   const args = ['-p', '--verbose', '--output-format', 'stream-json'];
 
   if (options.allowedTools?.length) {
@@ -149,7 +150,17 @@ export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaude
     args.push('--dangerously-skip-permissions');
   }
 
+  if (options.model) {
+    args.push('--model', options.model);
+  }
+
   args.push('--system-prompt', options.systemPrompt);
+  return args;
+}
+
+/** Spawn `claude -p` and collect output. */
+export async function runClaudeCli(options: RunClaudeOptions): Promise<RunClaudeResult> {
+  const args = buildCliArgs(options);
 
   return new Promise<RunClaudeResult>((resolve, reject) => {
     const child = spawn('claude', args, {

@@ -102,6 +102,34 @@ describe('dag-stages parsing', () => {
   });
 });
 
+describe('model selection flags', () => {
+  it('parses --model flag', () => {
+    const opts = parseArgs(['--model', 'claude-3-haiku-20240307', 'Do something']);
+    assert.equal(opts.model, 'claude-3-haiku-20240307');
+  });
+
+  it('parses --dag-model flag', () => {
+    const opts = parseArgs(['--dag-model', 'claude-3-opus-20240229', 'Do something']);
+    assert.equal(opts.dagModel, 'claude-3-opus-20240229');
+  });
+
+  it('model is undefined when --model flag is not provided', () => {
+    const opts = parseArgs(['Do something']);
+    assert.equal(opts.model, undefined);
+  });
+
+  it('dagModel is undefined when --dag-model flag is not provided', () => {
+    const opts = parseArgs(['Do something']);
+    assert.equal(opts.dagModel, undefined);
+  });
+
+  it('parses both --model and --dag-model together', () => {
+    const opts = parseArgs(['--model', 'claude-3-haiku-20240307', '--dag-model', 'claude-3-opus-20240229', 'Do something']);
+    assert.equal(opts.model, 'claude-3-haiku-20240307');
+    assert.equal(opts.dagModel, 'claude-3-opus-20240229');
+  });
+});
+
 describe('custom stage loading', () => {
   it('parseArgs with --pipeline including custom stage names parses correctly', () => {
     const opts = parseArgs(['--pipeline', 'Plan,Execute,Test,Verify', 'Do something']);

@@ -273,13 +273,13 @@ describe('DagDisplay', () => {
       assert.equal(result, 'hello worl...');
     });
 
-    it('uses default maxLen of 40', () => {
+    it('uses default maxLen of 80', () => {
       const short = 'Short description';
       assert.equal(truncateDesc(short), short);
 
-      const long = 'A'.repeat(50);
+      const long = 'A'.repeat(100);
       const result = truncateDesc(long);
-      assert.equal(result, 'A'.repeat(40) + '...');
+      assert.equal(result, 'A'.repeat(80) + '...');
     });
 
     it('handles empty string', () => {

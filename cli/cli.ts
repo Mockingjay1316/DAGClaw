@@ -48,6 +48,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.maxConcurrency = args[++i] ?? '';
     } else if (arg === '--dag-stages') {
       flags.dagStages = args[++i] ?? '';
+    } else if (arg === '--model') {
+      flags.model = args[++i] ?? '';
+    } else if (arg === '--dag-model') {
+      flags.dagModel = args[++i] ?? '';
     } else if (arg === '--yolo') {
       flags.yolo = true;
     } else if (arg === '--auto-approve' || arg === '--auto-execute') {
@@ -126,6 +130,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     dagStages: flags.dagStages
       ? (flags.dagStages as string).split(',').map(s => s.trim())
       : DEFAULTS.dagStages,
+    model: flags.model ? (flags.model as string) : undefined,
+    dagModel: flags.dagModel ? (flags.dagModel as string) : undefined,
   };
 }
 

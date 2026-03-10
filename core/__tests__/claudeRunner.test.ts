@@ -1,11 +1,14 @@
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseUsageFromCliOutput,
   estimateCost,
   checkClaudeCli,
   ClaudeRunError,
+  runClaudeCli,
+  buildCliArgs,
 } from '../claudeRunner.ts';
+import type { RunClaudeOptions } from '../claudeRunner.ts';
 
 describe('claudeRunner', () => {
   describe('parseUsageFromCliOutput', () => {
@@ -84,6 +87,43 @@ describe('claudeRunner', () => {
     it('handles empty partial output', () => {
       const err = new ClaudeRunError('failed', '', 2);
       assert.equal(err.partialOutput, '');
+    });
+  });
+
+  describe('runClaudeCli --model flag', () => {
+    it('RunClaudeOptions accepts a model field', () => {
+      // Type-level test: constructing an options object with model should compile
+      const opts: RunClaudeOptions = {
+        prompt: 'test prompt',
+        systemPrompt: 'you are helpful',
+        workDir: '/tmp',
+        backend: { type: 'cli' },
+        model: 'claude-3-haiku-20240307',
+      };
+      assert.equal(opts.model, 'claude-3-haiku-20240307');
+    });
+
+    it('includes --model in CLI args when model is provided', () => {
+      const args = buildCliArgs({
+        prompt: 'test prompt',
+        systemPrompt: 'you are helpful',
+        workDir: '/tmp',
+        backend: { type: 'cli' },
+        model: 'claude-3-haiku-20240307',
+      });
+      const modelFlagIndex = args.indexOf('--model');
+      assert.ok(modelFlagIndex !== -1, 'args should contain --model flag');
+      assert.equal(args[modelFlagIndex + 1], 'claude-3-haiku-20240307', 'model value should follow --model flag');
+    });
+
+    it('does not include --model in CLI args when model is not provided', () => {
+      const args = buildCliArgs({
+        prompt: 'test prompt',
+        systemPrompt: 'you are helpful',
+        workDir: '/tmp',
+        backend: { type: 'cli' },
+      });
+      assert.ok(!args.includes('--model'), 'args should NOT contain --model flag when model is not set');
     });
   });
 });

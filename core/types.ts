@@ -102,6 +102,7 @@ export const DagClawConfigStageRunnerSchema = z.object({
   systemPrompt: z.string(),
   promptTemplate: z.string(),
   allowedTools: z.array(z.string()).optional(),
+  model: z.string().optional(),
 });
 
 export const DagClawConfigStageSchema = z.object({
@@ -167,6 +168,7 @@ export interface StageRunnerConfig {
   systemPrompt: string;
   promptTemplate: string;
   allowedTools?: string[];
+  model?: string;
 }
 
 export interface StageDefinition {
@@ -280,4 +282,6 @@ export interface CliOptions {
   noSummary: boolean;
   noMemory: boolean;
   dagStages: string[];
+  model?: string;
+  dagModel?: string;
 }
