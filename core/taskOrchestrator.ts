@@ -86,6 +86,8 @@ export function buildChildOptions(parentOpts: CliOptions, subtask: Subtask, curr
     noSummary: true,
     noMemory: parentOpts.noMemory,
     dagStages: parentOpts.dagStages,
+    model: parentOpts.model,
+    dagModel: parentOpts.dagModel,
   };
 }
 
@@ -99,6 +101,22 @@ export function getFilesModifiedByGit(dir: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Resolve the model to use for a stage, with precedence:
+ * 1. Stage's own runnerConfig.model (most specific)
+ * 2. dagModel (only for parallel stages)
+ * 3. Global model
+ * 4. undefined (Claude CLI default)
+ */
+export function resolveModel(
+  stageModel: string | undefined,
+  isParallel: boolean,
+  dagModel: string | undefined,
+  globalModel: string | undefined,
+): string | undefined {
+  return stageModel ?? (isParallel ? dagModel : undefined) ?? globalModel;
 }
 
 // --- Orchestrator callbacks ---
@@ -259,6 +277,10 @@ export class TaskOrchestrator {
       this.status(statusLabel);
     }
 
+    const resolvedModel = resolveModel(
+      stage.runnerConfig.model, !!stage.parallel, this.opts.dagModel, this.opts.model,
+    );
+
     let result;
     try {
       result = await runClaudeCli({
@@ -269,6 +291,7 @@ export class TaskOrchestrator {
         timeoutMs: this.opts.timeoutSeconds * 1000,
         backend: this.opts.backend,
         dangerouslySkipPermissions: true,  // always skip in CLI -p mode; tools restricted via allowedTools
+        model: resolvedModel,
       });
     } catch (err) {
       // Stop standalone stage ticker on failure too

@@ -348,6 +348,35 @@ describe('buildChildOptions', () => {
   });
 });
 
+// --- resolveModel ---
+
+import { resolveModel } from '../taskOrchestrator.ts';
+
+describe('resolveModel', () => {
+  it('returns stage model when set (highest precedence)', () => {
+    assert.equal(resolveModel('stage-model', true, 'dag-model', 'global-model'), 'stage-model');
+    assert.equal(resolveModel('stage-model', false, 'dag-model', 'global-model'), 'stage-model');
+  });
+
+  it('returns dagModel for parallel stages when no stage model', () => {
+    assert.equal(resolveModel(undefined, true, 'dag-model', 'global-model'), 'dag-model');
+  });
+
+  it('skips dagModel for non-parallel stages, falls through to global', () => {
+    assert.equal(resolveModel(undefined, false, 'dag-model', 'global-model'), 'global-model');
+  });
+
+  it('returns global model when no stage or dag model', () => {
+    assert.equal(resolveModel(undefined, true, undefined, 'global-model'), 'global-model');
+    assert.equal(resolveModel(undefined, false, undefined, 'global-model'), 'global-model');
+  });
+
+  it('returns undefined when nothing is set', () => {
+    assert.equal(resolveModel(undefined, true, undefined, undefined), undefined);
+    assert.equal(resolveModel(undefined, false, undefined, undefined), undefined);
+  });
+});
+
 // --- TaskRegistry integration ---
 
 describe('TaskRegistry integration', () => {
