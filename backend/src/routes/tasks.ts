@@ -215,5 +215,21 @@ export function createTasksRouter(taskStore: TaskStore): Router {
     }
   });
 
+  // POST /api/tasks/:id/retry — retry a failed/cancelled task
+  router.post('/api/tasks/:id/retry', async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const result = await taskStore.retryTask(id);
+      if ('error' in result) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.status(201).json({ id: result.newId });
+    } catch (err) {
+      console.error('[tasks] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   return router;
 }

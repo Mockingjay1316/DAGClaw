@@ -15,6 +15,8 @@ export interface ManagedTask {
   pendingApproval?: { resolve: (approved: boolean) => void; message: string };
   orchestrator: TaskOrchestrator | null;
   error?: string;
+  pipeline?: string[];
+  permissionMode?: ApiPermissionMode;
 }
 
 /** Frontend permission mode values accepted by the API. */
@@ -108,6 +110,8 @@ export class TaskStore {
       runId: null,
       status: 'running',
       orchestrator: null,
+      pipeline: opts.pipeline,
+      permissionMode: opts.permissionMode,
     };
 
     this.tasks.set(taskId, task);
@@ -234,6 +238,24 @@ export class TaskStore {
     task.status = 'failed';
     this.wsServer?.broadcast(id, { type: 'approval_resolved', taskId: id, approved: false });
     return true;
+  }
+
+  /** Retry a completed/failed task by creating a new task with the same config. */
+  async retryTask(id: string): Promise<{ newId: string } | { error: string; status: number }> {
+    const original = this.tasks.get(id);
+    if (!original) {
+      return { error: 'Task not found', status: 404 };
+    }
+    if (original.status === 'running' || original.status === 'pending') {
+      return { error: 'Task is still running', status: 400 };
+    }
+    const newId = await this.createTask({
+      prompt: original.prompt,
+      workDir: original.workDir,
+      pipeline: original.pipeline,
+      permissionMode: original.permissionMode,
+    });
+    return { newId };
   }
 
   /** Cancel a running task. Returns true if task existed. */

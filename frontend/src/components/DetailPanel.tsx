@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
+import { useWebSocket } from '../hooks/useWebSocket.ts';
 import { PlanView } from './PlanView.tsx';
 import { ApprovalBanner } from './ApprovalBanner.tsx';
 import { ExecutionView } from './ExecutionView.tsx';
@@ -30,6 +31,12 @@ export function DetailPanel() {
   );
   const fetchUsage = useOrchestratorStore((state) => state.fetchUsage);
 
+  const { cancelTask } = useWebSocket();
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const updateTaskStatus = useOrchestratorStore((state) => state.updateTaskStatus);
+  const addRootTask = useOrchestratorStore((state) => state.addRootTask);
+  const selectRoot = useOrchestratorStore((state) => state.selectRoot);
+
   const [activityOpen, setActivityOpen] = useState(false);
 
   useEffect(() => {
@@ -37,6 +44,27 @@ export function DetailPanel() {
       fetchUsage(selectedNodeId);
     }
   }, [selectedNodeId, task?.status, usage, fetchUsage]);
+
+  function handleCancel() {
+    if (!selectedNodeId) return;
+    cancelTask(selectedNodeId);
+    updateTaskStatus(selectedNodeId, 'cancelled');
+    setShowCancelConfirm(false);
+  }
+
+  async function handleRetry() {
+    if (!selectedNodeId || !task) return;
+    try {
+      const resp = await fetch(`/api/tasks/${selectedNodeId}/retry`, { method: 'POST' });
+      if (!resp.ok) return;
+      const { id: newId } = await resp.json();
+      // Add the new task to the sidebar and select it
+      addRootTask({ id: newId, prompt: task.prompt, workDir: task.workDir ?? '', status: 'running', runId: null });
+      selectRoot(newId);
+    } catch {
+      // Silently ignore retry errors
+    }
+  }
 
   if (!selectedNodeId) {
     return (
@@ -114,6 +142,44 @@ export function DetailPanel() {
               />
             </div>
           )}
+          {/* Cancel button — visible when running, pending, or awaiting_approval */}
+          {(taskStatus === 'running' || taskStatus === 'pending' || taskStatus === 'awaiting_approval') && (
+            showCancelConfirm ? (
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-sm text-gray-300">Cancel this task?</span>
+                <button
+                  onClick={handleCancel}
+                  className="px-2 py-1 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setShowCancelConfirm(false)}
+                  className="px-2 py-1 text-xs font-medium bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowCancelConfirm(true)}
+                className="px-3 py-1 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+              >
+                Cancel
+              </button>
+            )
+          )}
+
+          {/* Retry button — visible when failed or cancelled */}
+          {(taskStatus === 'failed' || taskStatus === 'cancelled') && (
+            <button
+              onClick={handleRetry}
+              className="px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+            >
+              Retry
+            </button>
+          )}
+
           {selectedNodeId && (
             <div className="ml-auto">
               <CostDisplay taskId={selectedNodeId} />

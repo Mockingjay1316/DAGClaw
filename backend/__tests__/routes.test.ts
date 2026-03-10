@@ -57,6 +57,22 @@ function createMockTaskStore() {
       task.status = 'cancelled';
       return true;
     },
+
+    async retryTask(id: string): Promise<{ newId: string } | { error: string; status: number }> {
+      const task = tasks.get(id);
+      if (!task) return { error: 'Task not found', status: 404 };
+      if (task.status === 'running') return { error: 'Task is still running', status: 400 };
+      const newId = 'task-' + (tasks.size + 1);
+      tasks.set(newId, {
+        id: newId,
+        prompt: task.prompt,
+        workDir: task.workDir,
+        status: 'running',
+        runId: null,
+        orchestrator: null,
+      });
+      return { newId };
+    },
   };
 }
 
@@ -527,5 +543,49 @@ describe('Task usage routes', () => {
     assert.equal(res.status, 404);
     const body = await res.json();
     assert.ok(body.error);
+  });
+});
+
+// ── Task retry routes ──────────────────────────────────────────────────────
+
+describe('Task retry routes', () => {
+  it('POST /api/tasks/:id/retry → 201 with new task id when original task is failed', async () => {
+    // Create a task and manually set its status to failed
+    const createRes = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'retry test', workDir: testWorkDir }),
+    });
+    const { id } = await createRes.json();
+    mockStore.getTask(id).status = 'failed';
+
+    const res = await fetch(`${baseUrl}/api/tasks/${id}/retry`, { method: 'POST' });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.ok(body.id, 'response should have a new task id');
+    assert.notEqual(body.id, id, 'new task id should differ from original');
+  });
+
+  it('POST /api/tasks/:id/retry → 404 when task not found', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks/nonexistent-id/retry`, { method: 'POST' });
+    assert.equal(res.status, 404);
+    const body = await res.json();
+    assert.ok(body.error, 'should have error message');
+  });
+
+  it('POST /api/tasks/:id/retry → 400 when task is still running', async () => {
+    // Create a task (default status is 'running')
+    const createRes = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'running retry test', workDir: testWorkDir }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await fetch(`${baseUrl}/api/tasks/${id}/retry`, { method: 'POST' });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.ok(body.error, 'should have error message');
+    assert.match(body.error, /running/i, 'error should mention task is still running');
   });
 });
