@@ -18,7 +18,7 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '\u2026' : text;
 }
 
-export function Sidebar() {
+export function Sidebar({ onHistoryClick }: { onHistoryClick?: () => void }) {
   const rootTasks = useOrchestratorStore((s) => s.rootTasks);
   const selectedRootId = useOrchestratorStore((s) => s.selectedRootId);
   const setRootTasks = useOrchestratorStore((s) => s.setRootTasks);
@@ -92,6 +92,15 @@ export function Sidebar() {
             </button>
           ))}
         </nav>
+
+        <div className="p-3 border-t border-gray-700">
+          <button
+            onClick={onHistoryClick}
+            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm font-medium rounded transition-colors cursor-pointer"
+          >
+            📋 History
+          </button>
+        </div>
       </aside>
 
       {showCreate && <CreateTaskForm onClose={() => setShowCreate(false)} />}

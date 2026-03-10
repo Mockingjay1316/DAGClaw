@@ -1,26 +1,38 @@
+import { useState } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { TaskTreeView } from './components/TaskTreeView.tsx';
 import { DetailPanel } from './components/DetailPanel.tsx';
+import { RunHistory } from './components/RunHistory.tsx';
 import { useWebSocket } from './hooks/useWebSocket.ts';
 
 function App() {
   // Establish WebSocket connection on app mount
   const { connected } = useWebSocket();
 
+  const [viewMode, setViewMode] = useState<'tasks' | 'history'>('tasks');
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Left: Sidebar (fixed width) */}
-      <Sidebar />
+      <Sidebar onHistoryClick={() => setViewMode(m => m === 'history' ? 'tasks' : 'history')} />
 
-      {/* Center: Task tree view */}
-      <div className="flex-1 min-w-[300px] border-l border-gray-800 overflow-y-auto">
-        <TaskTreeView />
-      </div>
+      {viewMode === 'tasks' ? (
+        <>
+          {/* Center: Task tree view */}
+          <div className="flex-1 min-w-[300px] border-l border-gray-800 overflow-y-auto">
+            <TaskTreeView />
+          </div>
 
-      {/* Right: Detail panel */}
-      <div className="flex-[2] border-l border-gray-800 overflow-hidden">
-        <DetailPanel />
-      </div>
+          {/* Right: Detail panel */}
+          <div className="flex-[2] border-l border-gray-800 overflow-hidden">
+            <DetailPanel />
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 border-l border-gray-800 overflow-y-auto">
+          <RunHistory />
+        </div>
+      )}
 
       {/* Connection status indicator */}
       {!connected && (

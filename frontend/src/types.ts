@@ -109,6 +109,51 @@ export interface UsageData {
   perSubtask: Record<string, StageUsage>;
 }
 
+// --- Run History ---
+
+export interface RunSummary {
+  id: string;
+  prompt: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: string;
+  duration: number | null;
+  estimatedCost: number;
+}
+
+export interface RunManifest {
+  id: string;
+  prompt: string;
+  workDir: string;
+  pipeline: string[];
+  backend: string;
+  permissionMode: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: string;
+  completedAt: string | null;
+  duration: number | null;
+  tree: {
+    index: number;
+    description: string;
+    status: string;
+    stage: string;
+    children: unknown[];
+  };
+  usage: {
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCacheReadTokens: number;
+    estimatedCost: number;
+    perStage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; estimatedCost: number }>;
+    perSubtask: Record<number, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; estimatedCost: number }>;
+  };
+  gitInfo?: {
+    branch: string;
+    commitBefore: string;
+    commitAfter: string | null;
+    filesModified: string[];
+  };
+}
+
 // --- Server → Client WebSocket Messages ---
 
 export type WsMessage =
