@@ -2,8 +2,13 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createTasksRouter } from '../src/routes/tasks.ts';
 import { createStagesRouter } from '../src/routes/stages.ts';
+import { createRunsRouter } from '../src/routes/runs.ts';
+import type { RunManifest } from '../../core/types.ts';
 
 // ── Mock TaskStore ──────────────────────────────────────────────────────────
 
@@ -55,15 +60,79 @@ function createMockTaskStore() {
   };
 }
 
+// ── Test fixtures ───────────────────────────────────────────────────────────
+
+function createTestManifest(id: string, overrides?: Partial<RunManifest>): RunManifest {
+  return {
+    id,
+    prompt: `Test task ${id}`,
+    workDir: '/tmp/test',
+    pipeline: ['Plan', 'Execute', 'Verify'],
+    backend: 'claude-cli',
+    permissionMode: 'interactive',
+    status: 'completed',
+    startedAt: '2026-03-09T10:00:00.000Z',
+    completedAt: '2026-03-09T10:05:00.000Z',
+    duration: 300000,
+    tree: { id, prompt: `Test task ${id}`, status: 'completed', stages: {}, children: [] },
+    usage: {
+      totalInputTokens: 1000,
+      totalOutputTokens: 500,
+      totalCacheReadTokens: 200,
+      estimatedCost: 0.05,
+      perStage: {},
+      perSubtask: {},
+    },
+    ...overrides,
+  };
+}
+
 // ── Test setup ──────────────────────────────────────────────────────────────
 
 let server: http.Server;
 let baseUrl: string;
 let mockStore: ReturnType<typeof createMockTaskStore>;
+let tempWorkDir: string;
 const testWorkDir = process.env.HOME || '/tmp';
 
 before(async () => {
-  // Allow testWorkDir for path traversal checks
+  // Create temp directory with .dagclaw/runs/ structure for run history tests
+  tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dagclaw-test-'));
+  const runsDir = path.join(tempWorkDir, '.dagclaw', 'runs');
+
+  // Create two test runs with manifest files
+  const run1Id = '2026-03-09T10-00-00_aaaaaaaa';
+  const run2Id = '2026-03-09T10-10-00_bbbbbbbb';
+
+  const run1Dir = path.join(runsDir, run1Id);
+  const run2Dir = path.join(runsDir, run2Id);
+  fs.mkdirSync(run1Dir, { recursive: true });
+  fs.mkdirSync(run2Dir, { recursive: true });
+
+  fs.writeFileSync(
+    path.join(run1Dir, 'manifest.json'),
+    JSON.stringify(createTestManifest(run1Id)),
+  );
+  fs.writeFileSync(
+    path.join(run2Dir, 'manifest.json'),
+    JSON.stringify(createTestManifest(run2Id, {
+      prompt: 'Second test task',
+      status: 'running',
+      startedAt: '2026-03-09T10:10:00.000Z',
+      completedAt: null,
+      duration: null,
+      usage: {
+        totalInputTokens: 2000,
+        totalOutputTokens: 1000,
+        totalCacheReadTokens: 400,
+        estimatedCost: 0.10,
+        perStage: {},
+        perSubtask: {},
+      },
+    })),
+  );
+
+  // Allow both testWorkDir and tempWorkDir for path traversal checks
   process.env.CLAW_ALLOWED_DIR = testWorkDir;
   // Disable rate limiting for route tests
   process.env.CLAW_RATE_LIMIT_MAX = '1000';
@@ -71,6 +140,7 @@ before(async () => {
 
   const app = express();
   app.use(express.json());
+  app.use(createRunsRouter(tempWorkDir));
   app.use(createTasksRouter(mockStore as any));
   app.use(createStagesRouter({}));
   app.get('/api/health', (_req, res) => {
@@ -90,6 +160,8 @@ after(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+  // Clean up temp directory
+  fs.rmSync(tempWorkDir, { recursive: true, force: true });
 });
 
 // ── Task routes ─────────────────────────────────────────────────────────────
@@ -333,5 +405,94 @@ describe('Health route', () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.deepEqual(body, { status: 'ok' });
+  });
+});
+
+// ── Run history routes ──────────────────────────────────────────────────────
+
+describe('Run history routes', () => {
+  it('GET /api/runs → 200 with array of run summaries', async () => {
+    const res = await fetch(`${baseUrl}/api/runs`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(Array.isArray(body), 'response should be an array');
+    assert.equal(body.length, 2, 'should return 2 test runs');
+    // Should be sorted by most recent first
+    assert.ok(body[0].id.includes('bbbbbbbb'), 'most recent run should be first');
+    assert.ok(body[1].id.includes('aaaaaaaa'), 'older run should be second');
+    // Verify summary fields
+    assert.equal(typeof body[0].prompt, 'string');
+    assert.equal(typeof body[0].status, 'string');
+    assert.equal(typeof body[0].startedAt, 'string');
+    assert.equal(typeof body[0].estimatedCost, 'number');
+  });
+
+  it('GET /api/runs/:id → 200 with full manifest when run exists', async () => {
+    const runId = '2026-03-09T10-00-00_aaaaaaaa';
+    const res = await fetch(`${baseUrl}/api/runs/${runId}`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.id, runId);
+    assert.equal(body.prompt, `Test task ${runId}`);
+    assert.equal(body.status, 'completed');
+    assert.ok(body.usage, 'should have usage field');
+    assert.equal(body.usage.totalInputTokens, 1000);
+    assert.ok(body.tree, 'should have tree field');
+  });
+
+  it('GET /api/runs/:id → 404 when run not found', async () => {
+    const res = await fetch(`${baseUrl}/api/runs/nonexistent-run-id`);
+    assert.equal(res.status, 404);
+    const body = await res.json();
+    assert.ok(body.error);
+  });
+});
+
+// ── Task usage routes ───────────────────────────────────────────────────────
+
+describe('Task usage routes', () => {
+  it('GET /api/tasks/:id/usage → 200 with usage data when task has runId', async () => {
+    // Create a task and manually set its runId and workDir to point to our temp fixture
+    const createRes = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'usage test', workDir: testWorkDir }),
+    });
+    const { id } = await createRes.json();
+    // Directly set the task's runId and workDir on the mock store
+    const task = mockStore.getTask(id);
+    task.runId = '2026-03-09T10-00-00_aaaaaaaa';
+    task.workDir = tempWorkDir;
+
+    const res = await fetch(`${baseUrl}/api/tasks/${id}/usage`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.usage, 'should have usage field');
+    assert.ok(body.usage.totalInputTokens !== undefined, 'should have totalInputTokens');
+    assert.ok(body.usage.totalOutputTokens !== undefined, 'should have totalOutputTokens');
+    assert.equal(body.usage.estimatedCost, 0.05);
+    assert.equal(body.taskId, id, 'should include taskId');
+  });
+
+  it('GET /api/tasks/:id/usage → 404 when task not found', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks/nonexistent-task/usage`);
+    assert.equal(res.status, 404);
+    const body = await res.json();
+    assert.ok(body.error);
+  });
+
+  it('GET /api/tasks/:id/usage → 404 when task has no runId', async () => {
+    // Create a task (default runId is null)
+    const createRes = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'no-run test', workDir: testWorkDir }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await fetch(`${baseUrl}/api/tasks/${id}/usage`);
+    assert.equal(res.status, 404);
+    const body = await res.json();
+    assert.ok(body.error);
   });
 });
