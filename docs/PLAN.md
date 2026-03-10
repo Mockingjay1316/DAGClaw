@@ -883,20 +883,20 @@ This gives users a natural "pick up where I left off" workflow.
 
 ## Future Roadmap
 
-### v0.1.1 — Next (interleaved backend + frontend)
+### v0.1.1 — Complete
 
-**Backend (done):**
+**Backend:**
 - ~~**Memory distillation pipeline**~~ — Structured memory format with title, one-liner, summary, detailed sections. Two-tier storage (per-run + project-level). NDJSON extraction. `readSummaries()` API for future retrieval. `--distill-model` flag.
 - ~~**Execute-level retry**~~ — DAG runner retries failed subtasks before cascade-skipping. `maxSubtaskRetries`, `retryWorthy` signaling, `ClaudeRunError` always retryable.
 - ~~**Per-worker model selection**~~ — `--model` for global default, `--dag-model` for DAG override, per-stage model in `dagclaw.config.json`. `resolveModel()` helper.
 - ~~**Runs/usage API**~~ — `GET /api/runs`, `GET /api/runs/:id`, `GET /api/tasks/:id/usage`, `usage_update` WebSocket broadcasts.
 
 **Frontend:**
-- Activity timeline (event log with timestamps)
-- Cost/token display per stage and total
-- Task lifecycle controls (cancel, retry from UI)
-- Permission mode selector
-- Run history browser
+- ~~**Permission mode selector**~~ — 3-mode dropdown (Interactive, Auto-approve, YOLO) replacing autoApprove checkbox. Backend `mapPermissionMode()` with backward compat.
+- ~~**Activity timeline**~~ — Chronological event log per task. `TimelineEvent` in store, 500-event cap, colored dots, relative timestamps.
+- ~~**Cost/token display**~~ — Live `$X.XX | Xk in / Xk out` with expandable per-stage breakdown. `usage_update` WS handler + `fetchUsage()` for completed tasks.
+- ~~**Run history browser**~~ — Paginated run list (20/page) with status badges, expandable detail (cost table, subtask tree, git info). History toggle in sidebar.
+- ~~**Task lifecycle controls**~~ — Cancel button with confirmation dialog, Retry button for failed/cancelled tasks. `POST /api/tasks/:id/retry` endpoint.
 
 ### v0.2 — Context management + visualization
 
