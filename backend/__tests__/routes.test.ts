@@ -324,6 +324,39 @@ describe('Task input validation', () => {
     assert.equal(res.status, 400);
   });
 
+  it('POST /api/tasks with valid permissionMode=yolo returns 201', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, permissionMode: 'yolo' }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.ok(body.id);
+  });
+
+  it('POST /api/tasks with invalid permissionMode returns 400', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, permissionMode: 'invalid' }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /permissionMode/i);
+  });
+
+  it('POST /api/tasks with permissionMode and autoApprove both sent works (permissionMode takes precedence)', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, permissionMode: 'auto-approve', autoApprove: false }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.ok(body.id);
+  });
+
   it('POST /api/tasks with valid optional fields returns 201', async () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',

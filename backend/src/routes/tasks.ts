@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { resolve } from 'node:path';
 import type { Request, Response } from 'express';
-import { TaskStore } from '../taskStore.ts';
+import { TaskStore, type ApiPermissionMode } from '../taskStore.ts';
 import { RunLogger } from '../../../core/runLogger.ts';
 import { createRateLimiter } from '../middleware/rateLimit.ts';
+
+const VALID_PERMISSION_MODES: ApiPermissionMode[] = ['interactive', 'auto-approve', 'yolo'];
 
 export function createTasksRouter(taskStore: TaskStore): Router {
   const router = Router();
@@ -13,7 +15,7 @@ export function createTasksRouter(taskStore: TaskStore): Router {
   // POST /api/tasks — create a new task
   router.post('/api/tasks', taskLimiter, async (req: Request, res: Response) => {
     try {
-      const { prompt, workDir, pipeline, autoApprove } = req.body ?? {};
+      const { prompt, workDir, pipeline, autoApprove, permissionMode } = req.body ?? {};
 
       if (typeof prompt !== 'string' || prompt.trim() === '') {
         res.status(400).json({ error: 'prompt must be a non-empty string' });
@@ -46,8 +48,12 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         res.status(400).json({ error: 'autoApprove must be a boolean' });
         return;
       }
+      if (permissionMode !== undefined && !VALID_PERMISSION_MODES.includes(permissionMode)) {
+        res.status(400).json({ error: `permissionMode must be one of: ${VALID_PERMISSION_MODES.join(', ')}` });
+        return;
+      }
 
-      const id = await taskStore.createTask({ prompt, workDir: resolvedDir, pipeline, autoApprove });
+      const id = await taskStore.createTask({ prompt, workDir: resolvedDir, pipeline, autoApprove, permissionMode });
       res.status(201).json({ id, prompt, workDir: resolvedDir, status: 'running', runId: null });
     } catch (err) {
       console.error('[tasks] Error:', err);

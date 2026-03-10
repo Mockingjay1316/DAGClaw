@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { TaskOrchestrator, OrchestratorCallbacks } from '../../core/taskOrchestrator.ts';
-import type { CliOptions, DAGEvent, Plan, StageDefinition } from '../../core/types.ts';
+import type { CliOptions, DAGEvent, Plan, StageDefinition, PermissionMode } from '../../core/types.ts';
 import { RunLogger } from '../../core/runLogger.ts';
 import { mergeStages } from '../../core/configLoader.ts';
 import { BUILTIN_STAGES } from '../../core/stageDefinitions.ts';
@@ -15,6 +15,28 @@ export interface ManagedTask {
   pendingApproval?: { resolve: (approved: boolean) => void; message: string };
   orchestrator: TaskOrchestrator | null;
   error?: string;
+}
+
+/** Frontend permission mode values accepted by the API. */
+export type ApiPermissionMode = 'interactive' | 'auto-approve' | 'yolo';
+
+/** Map API permissionMode (or legacy autoApprove) to CliOptions-compatible values. */
+export function mapPermissionMode(
+  mode?: ApiPermissionMode,
+  legacyAutoApprove?: boolean,
+): { autoApprove: boolean; dangerouslySkipPermissions: boolean; permissionMode: PermissionMode } {
+  if (mode === 'interactive') {
+    return { autoApprove: false, dangerouslySkipPermissions: false, permissionMode: 'interactive' };
+  }
+  if (mode === 'auto-approve') {
+    return { autoApprove: true, dangerouslySkipPermissions: false, permissionMode: 'auto' };
+  }
+  if (mode === 'yolo') {
+    return { autoApprove: true, dangerouslySkipPermissions: true, permissionMode: 'auto' };
+  }
+  // Fallback: no permissionMode provided — use legacy autoApprove boolean
+  const auto = legacyAutoApprove ?? false;
+  return { autoApprove: auto, dangerouslySkipPermissions: false, permissionMode: 'auto' };
 }
 
 /** Map DAGEvent.type to WebSocket message type. */
@@ -47,6 +69,7 @@ export class TaskStore {
     workDir: string;
     pipeline?: string[];
     autoApprove?: boolean;
+    permissionMode?: ApiPermissionMode;
   }): Promise<string> {
     const MAX_CONCURRENT_TASKS = parseInt(process.env.CLAW_MAX_TASKS || '5', 10);
     const running = [...this.tasks.values()].filter(t => t.status === 'running').length;
@@ -56,13 +79,19 @@ export class TaskStore {
 
     const taskId = crypto.randomUUID();
 
+    // Map API permission mode to CLI options
+    const mapped = mapPermissionMode(opts.permissionMode, opts.autoApprove);
+    // TODO: dangerouslySkipPermissions needs plumbing through CliOptions in a future change.
+    // Currently hardcoded to true in taskOrchestrator.ts runOne().
+    // mapped.dangerouslySkipPermissions is derived but not yet passed to CliOptions.
+
     const cliOpts: CliOptions = {
       prompt: opts.prompt,
       workDir: opts.workDir,
       pipeline: opts.pipeline ?? ['Plan', 'Execute', 'Verify'],
       backend: { type: 'cli' },
-      permissionMode: 'auto',
-      autoApprove: opts.autoApprove ?? false,
+      permissionMode: mapped.permissionMode,
+      autoApprove: mapped.autoApprove,
       maxRetries: 1,
       maxConcurrency: 4,
       maxDepth: 3,

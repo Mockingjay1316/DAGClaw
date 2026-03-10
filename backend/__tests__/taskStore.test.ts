@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { TaskStore, ManagedTask } from '../src/taskStore.ts';
+import { TaskStore, ManagedTask, mapPermissionMode } from '../src/taskStore.ts';
 
 describe('TaskStore', () => {
   it('createTask returns a task id string', async () => {
@@ -141,5 +141,49 @@ describe('TaskStore', () => {
     };
     (store as any).tasks.set('no-approval', task);
     assert.equal(store.approveTask('no-approval'), false);
+  });
+});
+
+describe('mapPermissionMode', () => {
+  it('interactive mode: autoApprove=false, dangerouslySkipPermissions=false, permissionMode=interactive', () => {
+    const result = mapPermissionMode('interactive');
+    assert.equal(result.autoApprove, false);
+    assert.equal(result.dangerouslySkipPermissions, false);
+    assert.equal(result.permissionMode, 'interactive');
+  });
+
+  it('auto-approve mode: autoApprove=true, dangerouslySkipPermissions=false, permissionMode=auto', () => {
+    const result = mapPermissionMode('auto-approve');
+    assert.equal(result.autoApprove, true);
+    assert.equal(result.dangerouslySkipPermissions, false);
+    assert.equal(result.permissionMode, 'auto');
+  });
+
+  it('yolo mode: autoApprove=true, dangerouslySkipPermissions=true, permissionMode=auto', () => {
+    const result = mapPermissionMode('yolo');
+    assert.equal(result.autoApprove, true);
+    assert.equal(result.dangerouslySkipPermissions, true);
+    assert.equal(result.permissionMode, 'auto');
+  });
+
+  it('undefined falls back to provided autoApprove=true', () => {
+    const result = mapPermissionMode(undefined, true);
+    assert.equal(result.autoApprove, true);
+    assert.equal(result.dangerouslySkipPermissions, false);
+    assert.equal(result.permissionMode, 'auto');
+  });
+
+  it('undefined falls back to provided autoApprove=false', () => {
+    const result = mapPermissionMode(undefined, false);
+    assert.equal(result.autoApprove, false);
+    assert.equal(result.dangerouslySkipPermissions, false);
+    assert.equal(result.permissionMode, 'auto');
+  });
+
+  it('undefined with no autoApprove defaults to false', () => {
+    const result = mapPermissionMode(undefined);
+    assert.equal(result.autoApprove, false);
+    assert.equal(result.dangerouslySkipPermissions, false);
+    assert.equal(result.permissionMode, 'auto');
   });
 });

@@ -14,7 +14,7 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
   const [prompt, setPrompt] = useState('');
   const [workDir, setWorkDir] = useState('/');
   const [pipeline, setPipeline] = useState('Plan,Execute,Verify');
-  const [autoApprove, setAutoApprove] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<'interactive' | 'auto-approve' | 'yolo'>('interactive');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -33,7 +33,7 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
           prompt: prompt.trim(),
           workDir,
           pipeline: pipeline.split(',').map((s) => s.trim()).filter(Boolean),
-          autoApprove,
+          permissionMode,
         }),
       });
 
@@ -110,18 +110,21 @@ export function CreateTaskForm({ onClose }: CreateTaskFormProps) {
             />
           </div>
 
-          {/* Auto Approve */}
-          <div className="flex items-center gap-2">
-            <input
-              id="autoApprove"
-              type="checkbox"
-              checked={autoApprove}
-              onChange={(e) => setAutoApprove(e.target.checked)}
-              className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-blue-500 focus:ring-blue-500"
-            />
-            <label htmlFor="autoApprove" className="text-sm text-gray-300">
-              Auto-approve plan
+          {/* Permission Mode */}
+          <div>
+            <label htmlFor="permissionMode" className="block text-sm font-medium text-gray-300 mb-1">
+              Permission Mode
             </label>
+            <select
+              id="permissionMode"
+              value={permissionMode}
+              onChange={(e) => setPermissionMode(e.target.value as 'interactive' | 'auto-approve' | 'yolo')}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="interactive">Interactive — approve plan & tool use</option>
+              <option value="auto-approve">Auto-approve plan — still confirms tool use</option>
+              <option value="yolo">Full auto (YOLO) — no approvals</option>
+            </select>
           </div>
 
           {/* Error */}
