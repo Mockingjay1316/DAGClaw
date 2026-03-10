@@ -97,7 +97,8 @@ export type WsMessage =
   | { type: 'task_error'; taskId: string; error: string }
   | { type: 'task_complete'; taskId: string }
   | { type: 'verification_result'; taskId: string; result: VerificationResult }
-  | { type: 'retry'; taskId: string; indices: number[] };
+  | { type: 'retry'; taskId: string; indices: number[] }
+  | { type: 'usage_update'; taskId: string; usage: { totalInputTokens: number; totalOutputTokens: number; totalCacheReadTokens: number; estimatedCost: number; perStage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }>; perSubtask: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }> } };
 
 // --- Client → Server WebSocket Messages ---
 

@@ -5,6 +5,7 @@ import { WsServer } from './websocket/wsServer.ts';
 import { TaskStore } from './taskStore.ts';
 import { createTasksRouter } from './routes/tasks.ts';
 import { createStagesRouter } from './routes/stages.ts';
+import { createRunsRouter } from './routes/runs.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import type { StageDefinition } from '../../core/types.ts';
 
@@ -46,6 +47,9 @@ wsServer.setTaskStore(taskStore);
 
 app.use(createTasksRouter(taskStore));
 app.use(createStagesRouter(customStages));
+
+const runsWorkDir = process.env.CLAW_ALLOWED_DIR || process.env.HOME || '/tmp';
+app.use(createRunsRouter(runsWorkDir));
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

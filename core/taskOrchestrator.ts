@@ -165,6 +165,9 @@ export class TaskOrchestrator {
   private isChild: boolean;
   private stageRegistry?: Record<string, StageDefinition>;
 
+  /** The current run ID, set early in run() for external access. */
+  public currentRunId: string | null = null;
+
   constructor(opts: CliOptions, cb: OrchestratorCallbacks = {}, depth: number = 0, logger?: RunLogger, stageRegistry?: Record<string, StageDefinition>) {
     this.opts = opts;
     this.logger = logger ?? new RunLogger(opts.workDir);
@@ -194,6 +197,7 @@ export class TaskOrchestrator {
       prompt: this.opts.prompt, pipeline: this.opts.pipeline,
       backend: this.opts.backend.type, permissionMode: this.opts.permissionMode, gitInfo,
     });
+    this.currentRunId = runId;
     if (!this.isChild) acquireLock(this.opts.workDir, runId);
     this.logger.cleanTmp();
 

@@ -90,12 +90,44 @@ export class TaskStore {
       onDAGEvent: (event: DAGEvent) => {
         const { type: _eventType, ...eventData } = event;
         this.wsServer?.broadcast(taskId, { type: mapDAGEventType(event), taskId, ...eventData });
+        // Broadcast usage update after each subtask completes
+        if (event.type === 'subtask-completed' || event.type === 'subtask-failed') {
+          const runId = task.orchestrator?.currentRunId;
+          if (runId) {
+            try {
+              const logger = new RunLogger(opts.workDir);
+              const manifest = logger.readManifest(runId);
+              this.wsServer?.broadcast(taskId, {
+                type: 'usage_update',
+                taskId,
+                usage: manifest.usage,
+              });
+            } catch {
+              // Ignore if manifest not readable yet
+            }
+          }
+        }
       },
       onStageStart: (label: string, stageName?: string) => {
         this.wsServer?.broadcast(taskId, { type: 'stage_start', taskId, label, stageName: stageName ?? label });
       },
       onStageEnd: () => {
         this.wsServer?.broadcast(taskId, { type: 'stage_complete', taskId });
+        // Broadcast usage update after stage completes
+        const runId = task.orchestrator?.currentRunId;
+        if (runId) {
+          try {
+            const logger = new RunLogger(opts.workDir);
+            const manifest = logger.readManifest(runId);
+            this.wsServer?.broadcast(taskId, {
+              type: 'usage_update',
+              taskId,
+              usage: manifest.usage,
+            });
+          } catch {
+            // Ignore if manifest not readable yet
+          }
+        }
       },
       onApprovalRequest: (message: string) => {
         return new Promise<boolean>((resolve) => {
