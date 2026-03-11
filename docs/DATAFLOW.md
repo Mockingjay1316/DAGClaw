@@ -65,8 +65,8 @@ TaskOrchestrator.run()
 ├─ 1. IF !isChild: checkStaleLock(workDir)
 │     → returns {runId: string, pid: number} | null
 │
-├─ 2. checkClaudeCli()
-│     → returns boolean
+├─ 2. IF backend.type === 'cli': checkClaudeCli()
+│     → throws if claude binary not found
 │
 ├─ 3. captureGitInfo()
 │     → returns {branch, commitBefore, commitAfter: null, filesModified: []}
@@ -273,43 +273,54 @@ runDAG(runId, stage, state, subtasks: SubtaskDefinition[])
 │    │ 2: {deps: [0,1], status: "pending"}     │
 │    └─────────────────────────────────────────┘
 │
-├─ WHILE !resolver.allComplete():
+├─ Greedy scheduler (Promise.race, not batched):
 │    │
-│    ├─ resolver.getReady()
-│    │   → returns indices whose deps are all "complete"
-│    │   → e.g. first iteration: [0, 1]  (no deps)
+│    ├─ tryLaunch():
+│    │   WHILE running.size < maxConcurrency && !shuttingDown:
+│    │     ready = resolver.getReady().filter(not already running)
+│    │     IF empty: break
+│    │     idx = ready[0]
 │    │
-│    ├─ batch = ready.slice(0, maxConcurrency)
+│    │     Per-subtask stage resolution:
+│    │       subtask.stage? → getStageDefinition(subtask.stage, registry)
+│    │       else           → use parent stage (Execute)
 │    │
-│    ├─ Per-subtask stage resolution:
-│    │   subtask.stage? → getStageDefinition(subtask.stage, registry)
-│    │   else           → use parent stage (Execute)
-│    │
-│    ├─ FOR each subtask in batch:
 │    │     emitDAG({type: 'subtask-started', index})
 │    │
-│    ├─ Promise.allSettled(batch.map(runOne or runRecursive))
-│    │   → runs subtasks in parallel up to maxConcurrency
-│    │   → each subtask uses its resolved effectiveStage
-│    │   → if shouldRecurse(idx, plan): spawns child orchestrator
+│    │     executeSubtask(idx) — with per-subtask retry:
+│    │       FOR attempt = 1..maxAttempts (opts.maxSubtaskRetries + 1):
+│    │         try runOne or runRecursive
+│    │         on retryable error (ClaudeRunError or SubtaskError.retryWorthy):
+│    │           emitDAG({type: 'subtask-retrying', index, attempt, maxAttempts})
+│    │           continue
+│    │         on exhaustion:
+│    │           emitDAG({type: 'subtask-retry-exhausted', index, attempts})
+│    │           throw
 │    │
-│    └─ FOR each result:
-│         fulfilled → resolver.markComplete(idx)
-│                     emitDAG({type: 'subtask-completed', index, oneliner, elapsed})
-│         rejected  → emitDAG({type: 'subtask-failed', index, error, elapsed})
-│                     cascaded = resolver.markSkipped(idx)
-│                     → returns downstream indices that were cascade-skipped
-│                     state.skippedIndices.add(idx)
-│                     FOR each cascadedIdx:
-│                       state.skippedIndices.add(cascadedIdx)
-│                       emitDAG({type: 'subtask-skipped', index: cascadedIdx, cascadeFrom: idx})
+│    │     .then → resolver.markComplete(idx)
+│    │            emitDAG({type: 'subtask-completed', index, oneliner, elapsed})
+│    │     .catch → emitDAG({type: 'subtask-failed', index, error, elapsed})
+│    │              cascaded = resolver.markSkipped(idx)
+│    │              state.skippedIndices.add(idx)
+│    │              FOR each cascadedIdx:
+│    │                state.skippedIndices.add(cascadedIdx)
+│    │                emitDAG({type: 'subtask-skipped', index: cascadedIdx, cascadeFrom: idx})
+│    │     .finally → running.delete(idx); tryLaunch()
+│    │
+│    │     running.set(idx, promise)
+│    │
+│    ├─ tryLaunch()  ← initial call fills slots
+│    │
+│    └─ WHILE running.size > 0:
+│         await Promise.race(running.values())
 │
 │  emitDAG({type: 'dag-complete'})
 │
-│  Iteration example (3 subtasks, diamond dep):
-│    Iter 1: ready=[0,1] → run both → both complete
-│    Iter 2: ready=[2]   → run 2   → complete
-│    allComplete() → true → exit
+│  Example (3 subtasks, diamond dep, maxConcurrency=2):
+│    tryLaunch: ready=[0,1] → launch both → running={0,1}
+│    Promise.race → 0 completes → tryLaunch: ready=[2] but 1 still running → running={1,2}
+│    Promise.race → 1 completes → tryLaunch: nothing ready → running={2}
+│    Promise.race → 2 completes → running={} → exit
 ```
 
 ## `retryLoop()` — Verify Failure → Re-Execute → Re-Verify
@@ -366,7 +377,8 @@ runRecursive(runId, stage, state, subtask)
 │     → RunLogger with parentRunDir = runs/<parentRunId>/
 │     → child runs go to runs/<parentRunId>/children/<childRunId>/
 │
-├─ 4. new TaskOrchestrator(childOpts, callbacks, depth+1, childLogger)
+├─ 4. new TaskOrchestrator(childOpts, filteredCallbacks, depth+1, childLogger, stageRegistry)
+│     → strips onDAGEvent, onStageStart, onStageEnd from parent callbacks
 │     → isChild = true (skips lock management)
 │
 ├─ 5. child.run()
@@ -409,7 +421,8 @@ Agents write JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`). The orc
 {
   "success": true | false,
   "summary": "paragraph describing what was done",
-  "oneliner": "one-line description"
+  "oneliner": "one-line description",
+  "retryWorthy": false
 }
 ```
 

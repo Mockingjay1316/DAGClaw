@@ -157,8 +157,9 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 
 **`runDAG(stage, state, subtasks)`** — parallel execution:
 - Creates a `DependencyResolver` from the subtask list
-- Loops: get ready subtasks → batch up to maxConcurrency → `Promise.allSettled(runOne or runRecursive)` → mark complete/skipped
+- Greedy scheduler: `tryLaunch()` fills slots up to `maxConcurrency`, each completed task triggers `tryLaunch()` again via `.finally()`. `Promise.race` waits for any completion — no batching.
 - **Per-subtask stage routing**: if `subtask.stage` is set, resolves the stage definition from the registry; otherwise falls back to the parent stage (Execute)
+- **Per-subtask retry**: `executeSubtask()` wraps each invocation with retry logic (`maxSubtaskRetries`, default 1). Retries on `ClaudeRunError` (transient) or `SubtaskError` with `retryWorthy: true`.
 - If `shouldRecurse(index, plan)` is true, calls `runRecursive()` instead of `runOne()`
 - On failure: `markSkipped()` cascades to all downstream dependents and returns the cascaded indices
 

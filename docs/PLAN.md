@@ -214,26 +214,31 @@ interface PipelineState {
   skippedIndices: Set<number>;
   memoryContext: string;
   verification: VerificationResult | null;
+  dagPalette: string[];         // stages available for DAG subtask assignment (from --dag-stages)
+  postStages: string[];         // mandatory stages after DAG (derived from pipeline)
+  stageDescriptions: string;    // formatted palette descriptions for Plan system prompt
 }
 
 interface StageDefinition {
   name: string;
-  runnerConfig: Partial<ClaudeRunnerConfig>;
+  runnerConfig: StageRunnerConfig;
 
   // Stage behavior flags
   approvalRequired?: boolean;
+  approvalFormatter?: (state: PipelineState) => string;
   parallel?: boolean;                  // if true, uses DAG from subtaskExtractor
 
   // Lifecycle functions — each stage implements these
   subtaskExtractor?: (state: PipelineState) => SubtaskDefinition[];
   contextBuilder: (state: PipelineState, outputFile: string, subtask?: SubtaskDefinition) => Record<string, string>;
+  outputSchema?: { parse: (data: unknown) => unknown };  // Zod schema for structured output validation
   resultHandler: (state: PipelineState, parsedOutput: unknown | null, subtask?: SubtaskDefinition, sessionId?: string) => string;
 
-  // Optional
+  // Retry support
   resultInterpreter?: (output: any) => { pass: boolean; failedIndices?: number[] };
-  integrationVerifier?: boolean;
+  retryStage?: string;                 // stage to re-run for failed subtasks (e.g., "Execute")
   maxRetries?: number;
-  formatStatus?: (subtask?: SubtaskDefinition, status?: string) => string;
+  formatStatus?: (subtask?: SubtaskDefinition) => string;
 }
 ```
 
