@@ -278,7 +278,7 @@ describe('memoryDistiller', () => {
 
       await distillMemory('run-123', state, logger, memoryManager, opts, structuredRunner as any);
 
-      const [, content] = memoryManager.writeFile.mock.calls[0].arguments;
+      const [, content] = memoryManager.writeFile.mock.calls[0].arguments as [string, string];
       // Content passed through directly — title, blockquote, and body intact
       assert.ok(content.startsWith('# Added REST API Routes'));
       assert.ok(content.includes('> Implemented CRUD'));
