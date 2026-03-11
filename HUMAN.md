@@ -240,8 +240,7 @@ Loads custom stages from `dagclaw.config.ts` (dynamic import, priority) or `dagc
 
 ### `core/promptBuilder.ts` — Prompt Assembly
 
-- `interpolateTemplate(template, context)` — simple `{{key}}` replacement
-- `formatSnapshotCompact/Standard()` — formats ContextSnapshots at different detail levels
+- `interpolateTemplate(template, context)` — simple `{{key}}` replacement. Used by `claudeRunner.buildStagePrompt()` for both system prompts and prompt templates.
 
 ### `core/dependencyResolver.ts` — DAG Scheduler
 

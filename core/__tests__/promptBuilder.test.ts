@@ -1,22 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  interpolateTemplate,
-  formatSnapshotCompact,
-  formatSnapshotStandard,
-} from '../promptBuilder.ts';
-import type { ContextSnapshot } from '../types.ts';
-
-const makeSnapshot = (overrides: Partial<ContextSnapshot> = {}): ContextSnapshot => ({
-  nodeId: 'n1',
-  stage: 'Execute',
-  subtaskIndex: 0,
-  oneliner: 'Set up routes',
-  filesModified: ['src/routes.ts'],
-  summary: 'Created Express routes for API endpoints',
-  sessionId: 's1',
-  ...overrides,
-});
+import { interpolateTemplate } from '../promptBuilder.ts';
 
 describe('interpolateTemplate', () => {
   it('replaces simple placeholders', () => {
@@ -44,23 +28,3 @@ describe('interpolateTemplate', () => {
     assert.equal(result, '1 + 1');
   });
 });
-
-describe('formatSnapshotCompact', () => {
-  it('includes oneliner and files', () => {
-    const snap = makeSnapshot();
-    const formatted = formatSnapshotCompact(snap);
-    assert.ok(formatted.includes('Set up routes'));
-    assert.ok(formatted.includes('src/routes.ts'));
-    assert.ok(!formatted.includes('Created Express'));
-  });
-});
-
-describe('formatSnapshotStandard', () => {
-  it('includes full summary and files', () => {
-    const snap = makeSnapshot();
-    const formatted = formatSnapshotStandard(snap);
-    assert.ok(formatted.includes('Created Express routes'));
-    assert.ok(formatted.includes('src/routes.ts'));
-  });
-});
-

@@ -529,7 +529,8 @@ TaskOrchestrator.run()
       └─ Verify contextBuilder:
           (no memoryContext — Verify focuses on current run only)
 
-      promptBuilder.buildStagePrompt(template, context)
+      claudeRunner.buildStagePrompt(template, context)
+      → delegates to promptBuilder.interpolateTemplate()
       → replaces {{memoryContext}} with actual content
       → assembled prompt sent to Claude CLI
 ```
