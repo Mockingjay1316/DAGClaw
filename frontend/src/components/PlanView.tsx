@@ -43,7 +43,7 @@ export function PlanView({ taskId }: PlanViewProps) {
 
   return (
     <div className="bg-gray-800 rounded p-4 space-y-4">
-      <h2 className="text-lg font-semibold text-white">{plan.summary}</h2>
+      <h2 className="text-lg font-semibold text-white whitespace-pre-wrap">{plan.summary}</h2>
 
       {plan.qualityFlag && (
         <div className="bg-yellow-900/50 border border-yellow-700 rounded p-3 text-sm text-yellow-200">

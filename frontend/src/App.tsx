@@ -1,10 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { ProjectSidebar } from './components/ProjectSidebar.tsx';
 import { CenterPanel } from './components/CenterPanel.tsx';
 import { DetailPanel } from './components/DetailPanel.tsx';
 import { useWebSocket } from './hooks/useWebSocket.ts';
 import { useOrchestratorStore } from './stores/orchestratorStore.ts';
 import { useProjectStore } from './stores/projectStore.ts';
+
+const DEFAULT_PANEL_WIDTH = 400;
+const MIN_PANEL_WIDTH = 300;
+const MAX_PANEL_RATIO = 0.6; // 60% of viewport
 
 function App() {
   // Establish WebSocket connection on app mount
@@ -13,6 +17,39 @@ function App() {
   const selectedNodeId = useOrchestratorStore((s) => s.selectedNodeId);
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId);
   const setRootTasks = useOrchestratorStore((s) => s.setRootTasks);
+
+  // Resizable detail panel state
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+  const isDragging = useRef(false);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging.current) return;
+    const newWidth = window.innerWidth - e.clientX;
+    const maxWidth = window.innerWidth * MAX_PANEL_RATIO;
+    setPanelWidth(Math.max(MIN_PANEL_WIDTH, Math.min(maxWidth, newWidth)));
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [handleMouseMove, handleMouseUp]);
+
+  function handleDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }
 
   // Fetch tasks for selected project
   useEffect(() => {
@@ -42,7 +79,15 @@ function App() {
 
       {/* Right: Detail panel (slides in when a task is selected) */}
       {selectedNodeId && (
-        <div className="w-[40%] min-w-[400px] border-l border-gray-800 overflow-hidden">
+        <div
+          className="relative border-l border-gray-800 overflow-hidden flex-shrink-0"
+          style={{ width: panelWidth }}
+        >
+          {/* Drag handle */}
+          <div
+            onMouseDown={handleDragStart}
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-gray-600 active:bg-gray-500 transition-colors bg-transparent"
+          />
           <DetailPanel />
         </div>
       )}

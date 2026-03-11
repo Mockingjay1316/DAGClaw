@@ -106,7 +106,7 @@ export function DetailPanel() {
           <>
             <div>
               <span className="text-gray-400 text-sm">Prompt:</span>
-              <p className="text-white text-sm mt-1">{task.prompt}</p>
+              <p className="text-white text-sm mt-1 whitespace-pre-wrap">{task.prompt}</p>
             </div>
             <div>
               <span className="text-gray-400 text-sm">Working Directory:</span>
