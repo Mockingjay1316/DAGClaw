@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import type { Request, Response } from 'express';
 import type { ProjectStore } from '../projectStore.ts';
 import type { TaskStore } from '../taskStore.ts';
+import { restoreState } from '../stateRestorer.ts';
 
 export function createProjectsRouter(projectStore: ProjectStore, taskStore: TaskStore): Router {
   const router = Router();
@@ -50,6 +51,14 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
       }
 
       const project = projectStore.addProject(resolvedDir, name);
+
+      // Restore existing tasks/runs from .dagclaw directory
+      const restored = restoreState([project], taskStore);
+      if (restored.length > 0) {
+        const r = restored[0];
+        console.log(`[projects] Restored state for ${r.projectName}: ${r.todoCount} TODO, ${r.completedCount} completed, ${r.failedCount} failed, ${r.interruptedCount} interrupted`);
+      }
+
       res.status(201).json(project);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
