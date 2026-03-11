@@ -51,6 +51,7 @@ describe('TaskStore', () => {
       status: 'awaiting_approval',
       orchestrator: null,
       createdAt: new Date().toISOString(),
+      taskNumber: 1,
       pendingApproval: {
         resolve: (val: boolean) => { resolved = val; },
         message: 'Please approve',
@@ -77,6 +78,7 @@ describe('TaskStore', () => {
       status: 'awaiting_approval',
       orchestrator: null,
       createdAt: new Date().toISOString(),
+      taskNumber: 1,
       pendingApproval: {
         resolve: (val: boolean) => { resolved = val; },
         message: 'Please approve',
@@ -103,6 +105,7 @@ describe('TaskStore', () => {
       status: 'running',
       orchestrator: { shutdown: () => { shutdownCalled = true; } } as any,
       createdAt: new Date().toISOString(),
+      taskNumber: 1,
     };
     (store as any).tasks.set('test-cancel', task);
 
@@ -145,6 +148,7 @@ describe('TaskStore', () => {
       status: 'running',
       orchestrator: null,
       createdAt: new Date().toISOString(),
+      taskNumber: 1,
     };
     (store as any).tasks.set('no-approval', task);
     assert.equal(store.approveTask('no-approval'), false);
@@ -213,6 +217,7 @@ describe('TaskStore', () => {
       status: 'completed',
       orchestrator: null,
       createdAt: new Date().toISOString(),
+      taskNumber: 5,
     };
     store.registerTask(task);
     assert.equal(store.getTask('restored-task')?.prompt, 'from disk');

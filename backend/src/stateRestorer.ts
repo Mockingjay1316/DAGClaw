@@ -10,6 +10,7 @@ interface TodoTaskEntry {
   pipeline?: string[];
   permissionMode?: ApiPermissionMode;
   createdAt: string;
+  taskNumber?: number;
 }
 
 interface RestorationResult {
@@ -78,6 +79,7 @@ function restoreTodoTasks(project: Project, taskStore: TaskStore): number {
         pipeline: entry.pipeline,
         permissionMode: entry.permissionMode,
         createdAt: entry.createdAt,
+        taskNumber: entry.taskNumber ?? 0,
       };
       taskStore.registerTask(task);
       count++;
@@ -144,6 +146,7 @@ function restoreRunTasks(
           error,
           pipeline: manifest.pipeline,
           createdAt: manifest.startedAt ?? new Date().toISOString(),
+          taskNumber: 0,
         };
 
         taskStore.registerTask(task);

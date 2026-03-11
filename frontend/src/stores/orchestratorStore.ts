@@ -264,7 +264,11 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           const stageInfo = new Map(state.stageInfo);
           const existingSi = stageInfo.get(msg.taskId);
           stageInfo.set(msg.taskId, { currentStage: existingSi?.currentStage ?? 'Failed', status: 'failed' });
-          return { nodeMap, stageInfo };
+          // Set finishedAt on the task
+          const rootTasks = state.rootTasks.map(t =>
+            t.id === msg.taskId ? { ...t, finishedAt: t.finishedAt || new Date().toISOString() } : t
+          );
+          return { nodeMap, stageInfo, rootTasks };
         });
         pushEvent(msg.taskId, msg.type, `Task error: ${msg.error}`);
         break;
@@ -274,7 +278,11 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         set((state) => {
           const stageInfo = new Map(state.stageInfo);
           stageInfo.set(msg.taskId, { currentStage: 'Done', status: 'completed' });
-          return { stageInfo };
+          // Set finishedAt on the task
+          const rootTasks = state.rootTasks.map(t =>
+            t.id === msg.taskId ? { ...t, finishedAt: t.finishedAt || new Date().toISOString() } : t
+          );
+          return { stageInfo, rootTasks };
         });
         pushEvent(msg.taskId, msg.type, `Task completed`);
         break;
@@ -303,6 +311,21 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       // New project-level messages
       case 'task_status_changed':
         store.updateTaskStatus(msg.taskId, msg.newStatus);
+        set((state) => {
+          const now = new Date().toISOString();
+          const rootTasks = state.rootTasks.map(t => {
+            if (t.id !== msg.taskId) return t;
+            const updates: Partial<TaskSummary> = {};
+            if (msg.newStatus === 'running' && !t.startedAt) {
+              updates.startedAt = now;
+            }
+            if (['completed', 'failed', 'cancelled'].includes(msg.newStatus) && !t.finishedAt) {
+              updates.finishedAt = now;
+            }
+            return Object.keys(updates).length > 0 ? { ...t, ...updates } : t;
+          });
+          return { rootTasks };
+        });
         break;
 
       case 'project_tasks_snapshot':

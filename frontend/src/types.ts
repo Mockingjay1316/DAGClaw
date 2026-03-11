@@ -30,6 +30,9 @@ export interface TaskSummary {
   runId: string | null;
   error?: string;
   createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  taskNumber?: number;
 }
 
 export interface TaskDetail extends TaskSummary {

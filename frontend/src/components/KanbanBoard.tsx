@@ -13,7 +13,16 @@ export function KanbanBoard() {
     const tasks = rootTasks.filter(t => t.projectId === selectedProjectId);
     const groups: Record<string, TaskSummary[]> = {};
     for (const col of KANBAN_COLUMNS) {
-      groups[col.key] = tasks.filter(t => col.statuses.includes(t.status));
+      let colTasks = tasks.filter(t => col.statuses.includes(t.status));
+      // Sort done column: newest finished first
+      if (col.key === 'done') {
+        colTasks = [...colTasks].sort((a, b) => {
+          const aTime = a.finishedAt ? new Date(a.finishedAt).getTime() : 0;
+          const bTime = b.finishedAt ? new Date(b.finishedAt).getTime() : 0;
+          return bTime - aTime; // newest first
+        });
+      }
+      groups[col.key] = colTasks;
     }
     return groups;
   }, [rootTasks, selectedProjectId]);

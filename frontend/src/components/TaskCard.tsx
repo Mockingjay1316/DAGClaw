@@ -29,6 +29,31 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '\u2026' : text;
 }
 
+function formatElapsed(startedAt?: string, finishedAt?: string): string | null {
+  if (!startedAt || !finishedAt) return null;
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (ms < 0) return null;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSec = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainSec}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainMin = minutes % 60;
+  return `${hours}h ${remainMin}m`;
+}
+
+function formatFinishedTime(finishedAt?: string): string | null {
+  if (!finishedAt) return null;
+  const d = new Date(finishedAt);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) {
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 interface TaskCardProps {
   task: TaskSummary;
 }
@@ -80,6 +105,10 @@ export function TaskCard({ task }: TaskCardProps) {
         statusColors[task.status] || 'border-l-gray-500'
       } ${isSelected ? 'ring-1 ring-blue-500 bg-gray-700' : ''}`}
     >
+      {/* Task number */}
+      {task.taskNumber && (
+        <div className="text-xs text-gray-500 font-mono mb-1">#{task.taskNumber}</div>
+      )}
       <div className="flex items-start gap-2">
         <span className={`w-2 h-2 rounded-full shrink-0 mt-1 ${statusDots[task.status] || 'bg-gray-500'}`} />
         <div className="flex-1 min-w-0">
@@ -112,6 +141,14 @@ export function TaskCard({ task }: TaskCardProps) {
           )}
         </div>
       </div>
+      {task.finishedAt && (
+        <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+          <span>{formatFinishedTime(task.finishedAt)}</span>
+          {formatElapsed(task.startedAt, task.finishedAt) && (
+            <span>• {formatElapsed(task.startedAt, task.finishedAt)}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

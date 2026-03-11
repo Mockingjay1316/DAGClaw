@@ -24,6 +24,9 @@ export interface ManagedTask {
   pipeline?: string[];
   permissionMode?: ApiPermissionMode;
   createdAt: string;
+  taskNumber: number;
+  startedAt?: string;
+  finishedAt?: string;
 }
 
 /** Frontend permission mode values accepted by the API. */
@@ -69,6 +72,7 @@ interface TodoTaskFile {
     pipeline?: string[];
     permissionMode?: ApiPermissionMode;
     createdAt: string;
+    taskNumber: number;
   }>;
 }
 
@@ -76,6 +80,7 @@ export class TaskStore {
   private tasks = new Map<string, ManagedTask>();
   private wsServer: WsServer | null = null;
   private scheduler: TaskScheduler | null = null;
+  private nextTaskNumber = 1;
 
   constructor(private customStagesRef?: Record<string, StageDefinition>) {}
 
@@ -111,6 +116,7 @@ export class TaskStore {
       pipeline: opts.pipeline,
       permissionMode: opts.permissionMode,
       createdAt: now,
+      taskNumber: this.nextTaskNumber++,
     };
 
     this.tasks.set(taskId, task);
@@ -157,6 +163,9 @@ export class TaskStore {
 
     const oldStatus = task.status;
     task.status = 'running';
+    if (!task.startedAt) {
+      task.startedAt = new Date().toISOString();
+    }
     this.broadcastStatusChange(task, oldStatus);
 
     const mapped = mapPermissionMode(task.permissionMode);
@@ -198,6 +207,7 @@ export class TaskStore {
         task.runId = result.runId;
         const old = task.status;
         task.status = 'completed';
+        task.finishedAt = new Date().toISOString();
         this.broadcastStatusChange(task, old);
         this.wsServer?.broadcast(taskId, { type: 'task_complete', taskId });
         this.scheduler?.onTaskFinished(taskId);
@@ -205,6 +215,7 @@ export class TaskStore {
       (err: unknown) => {
         const old = task.status;
         task.status = 'failed';
+        task.finishedAt = new Date().toISOString();
         task.error = err instanceof Error ? err.message : String(err);
         console.error(`[taskStore] Task ${taskId} failed:`, task.error);
         this.broadcastStatusChange(task, old);
@@ -237,6 +248,9 @@ export class TaskStore {
   /** Register a pre-built ManagedTask (used by state restoration). */
   registerTask(task: ManagedTask): void {
     this.tasks.set(task.id, task);
+    if (task.taskNumber >= this.nextTaskNumber) {
+      this.nextTaskNumber = task.taskNumber + 1;
+    }
   }
 
   /** Get a task by id. */
@@ -317,6 +331,7 @@ export class TaskStore {
     task.orchestrator?.shutdown();
     const old = task.status;
     task.status = 'cancelled';
+    task.finishedAt = new Date().toISOString();
     this.broadcastStatusChange(task, old);
     this.scheduler?.onTaskFinished(id);
     return true;
@@ -333,6 +348,9 @@ export class TaskStore {
       runId: task.runId,
       error: task.error,
       createdAt: task.createdAt,
+      startedAt: task.startedAt,
+      finishedAt: task.finishedAt,
+      taskNumber: task.taskNumber,
     };
   }
 
@@ -431,6 +449,7 @@ export class TaskStore {
         pipeline: task.pipeline,
         permissionMode: task.permissionMode,
         createdAt: task.createdAt,
+        taskNumber: task.taskNumber,
       });
 
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
