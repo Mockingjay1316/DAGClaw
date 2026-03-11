@@ -344,10 +344,20 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             nodeMap,
           };
         });
+        // Eagerly fetch usage for completed tasks so cost data appears immediately
+        for (const task of msg.tasks) {
+          if (task.status === 'completed' && task.runId && !get().usage.has(task.id)) {
+            get().fetchUsage(task.id);
+          }
+        }
         break;
 
       case 'task_created':
         store.addRootTask(msg.task);
+        // If task arrives already completed (e.g., via retry), eagerly fetch usage
+        if (msg.task.status === 'completed' && msg.task.runId && !get().usage.has(msg.task.id)) {
+          get().fetchUsage(msg.task.id);
+        }
         break;
 
       default:

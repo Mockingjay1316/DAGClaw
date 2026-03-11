@@ -145,6 +145,8 @@ function restoreRunTasks(
           error,
           pipeline: manifest.pipeline,
           createdAt: manifest.startedAt ?? new Date().toISOString(),
+          startedAt: manifest.startedAt ?? new Date().toISOString(),
+          finishedAt: manifest.completedAt ?? undefined,
           taskNumber: 0,
         };
 

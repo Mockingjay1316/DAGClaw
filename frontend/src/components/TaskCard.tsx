@@ -119,9 +119,6 @@ export function TaskCard({ task }: TaskCardProps) {
             {stageInfo && task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled' && (
               <span className="text-xs text-gray-500">{stageInfo.currentStage}</span>
             )}
-            {task.status === 'completed' && (
-              <CostDisplay taskId={task.id} compact />
-            )}
           </div>
         </div>
         <div className="shrink-0 flex gap-1">
@@ -143,11 +140,14 @@ export function TaskCard({ task }: TaskCardProps) {
           )}
         </div>
       </div>
-      {task.finishedAt && (
+      {(task.finishedAt || task.status === 'completed') && (
         <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-          <span>{formatFinishedTime(task.finishedAt)}</span>
+          {task.finishedAt && <span>{formatFinishedTime(task.finishedAt)}</span>}
           {formatElapsed(task.startedAt, task.finishedAt) && (
             <span>• {formatElapsed(task.startedAt, task.finishedAt)}</span>
+          )}
+          {task.status === 'completed' && (
+            <span className="ml-auto"><CostDisplay taskId={task.id} compact /></span>
           )}
         </div>
       )}
