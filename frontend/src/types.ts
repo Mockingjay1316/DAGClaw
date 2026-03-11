@@ -1,6 +1,18 @@
+// --- Project types ---
+
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
+  addedAt: string;
+  taskCounts?: Record<string, number>;
+}
+
 // --- Task types ---
 
 export type TaskStatus =
+  | 'todo'
+  | 'queued'
   | 'pending'
   | 'running'
   | 'awaiting_approval'
@@ -13,9 +25,11 @@ export interface TaskSummary {
   id: string;
   prompt: string;
   workDir: string;
+  projectId: string;
   status: TaskStatus;
   runId: string | null;
   error?: string;
+  createdAt?: string;
 }
 
 export interface TaskDetail extends TaskSummary {
@@ -172,7 +186,10 @@ export type WsMessage =
   | { type: 'task_complete'; taskId: string }
   | { type: 'verification_result'; taskId: string; result: VerificationResult }
   | { type: 'retry'; taskId: string; indices: number[] }
-  | { type: 'usage_update'; taskId: string; usage: { totalInputTokens: number; totalOutputTokens: number; totalCacheReadTokens: number; estimatedCost: number; perStage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }>; perSubtask: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }> } };
+  | { type: 'usage_update'; taskId: string; usage: { totalInputTokens: number; totalOutputTokens: number; totalCacheReadTokens: number; estimatedCost: number; perStage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }>; perSubtask: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }> } }
+  | { type: 'task_status_changed'; taskId: string; projectId: string; oldStatus: string; newStatus: string }
+  | { type: 'project_tasks_snapshot'; projectId: string; tasks: TaskSummary[] }
+  | { type: 'task_created'; projectId: string; task: TaskSummary };
 
 // --- Client → Server WebSocket Messages ---
 
@@ -181,4 +198,7 @@ export type WsClientMessage =
   | { type: 'unsubscribe'; nodeIds: string[] }
   | { type: 'approve_plan'; taskId: string }
   | { type: 'reject_plan'; taskId: string; feedback?: string }
-  | { type: 'cancel'; taskId: string };
+  | { type: 'cancel'; taskId: string }
+  | { type: 'subscribe_project'; projectId: string }
+  | { type: 'unsubscribe_project'; projectId: string }
+  | { type: 'execute_task'; taskId: string };

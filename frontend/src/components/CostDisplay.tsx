@@ -11,11 +11,15 @@ function formatCost(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-export function CostDisplay({ taskId }: { taskId: string }) {
+export function CostDisplay({ taskId, compact }: { taskId: string; compact?: boolean }) {
   const usage = useOrchestratorStore((state) => state.usage.get(taskId));
   const [expanded, setExpanded] = useState(false);
 
-  if (!usage) return <span className="text-sm text-gray-500">—</span>;
+  if (!usage) return compact ? null : <span className="text-sm text-gray-500">—</span>;
+
+  if (compact) {
+    return <span className="text-xs text-green-400">{formatCost(usage.estimatedCost)}</span>;
+  }
 
   const stageEntries = Object.entries(usage.perStage);
 

@@ -30,6 +30,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const activeSubscriptions = new Set<string>();
+const activeProjectSubscriptions = new Set<string>();
 
 // External store for `connected` state (useSyncExternalStore pattern)
 const connectedListeners = new Set<() => void>();
@@ -89,6 +90,11 @@ function connect() {
     // Re-subscribe to all active subscriptions after reconnect
     if (activeSubscriptions.size > 0) {
       send({ type: 'subscribe', nodeIds: [...activeSubscriptions] });
+    }
+
+    // Re-subscribe to project subscriptions after reconnect
+    for (const projectId of activeProjectSubscriptions) {
+      send({ type: 'subscribe_project', projectId });
     }
   };
 
@@ -155,6 +161,16 @@ function unsubscribe(nodeIds: string[]) {
   send({ type: 'unsubscribe', nodeIds });
 }
 
+function subscribeProject(projectId: string) {
+  activeProjectSubscriptions.add(projectId);
+  send({ type: 'subscribe_project', projectId });
+}
+
+function unsubscribeProject(projectId: string) {
+  activeProjectSubscriptions.delete(projectId);
+  send({ type: 'unsubscribe_project', projectId });
+}
+
 function approvePlan(taskId: string) {
   send({ type: 'approve_plan', taskId });
 }
@@ -167,6 +183,10 @@ function cancelTask(taskId: string) {
   send({ type: 'cancel', taskId });
 }
 
+function executeTask(taskId: string) {
+  send({ type: 'execute_task', taskId });
+}
+
 // --- React hook ---
 
 export function useWebSocket() {
@@ -176,16 +196,18 @@ export function useWebSocket() {
     connect();
     return () => {
       // Don't disconnect on unmount — singleton stays alive.
-      // Only disconnect if this is truly the last consumer (not typical in SPA).
     };
   }, []);
 
   return {
     subscribe,
     unsubscribe,
+    subscribeProject,
+    unsubscribeProject,
     approvePlan,
     rejectPlan,
     cancelTask,
+    executeTask,
     connected: isConnected,
   };
 }

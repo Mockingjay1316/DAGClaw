@@ -11,6 +11,7 @@ import { CostDisplay } from './CostDisplay.tsx';
 
 export function DetailPanel() {
   const selectedNodeId = useOrchestratorStore((state) => state.selectedNodeId);
+  const selectNode = useOrchestratorStore((state) => state.selectNode);
   const task = useOrchestratorStore((state) =>
     state.selectedNodeId ? state.nodeMap.get(state.selectedNodeId) : undefined
   );
@@ -64,6 +65,10 @@ export function DetailPanel() {
     } catch {
       // Silently ignore retry errors
     }
+  }
+
+  function handleClose() {
+    selectNode(null);
   }
 
   if (!selectedNodeId) {
@@ -125,6 +130,13 @@ export function DetailPanel() {
       {/* Header bar with status and stage indicator */}
       <div className="px-4 py-3 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleClose}
+            className="text-gray-400 hover:text-white transition-colors cursor-pointer text-lg leading-none"
+            title="Close detail panel"
+          >
+            x
+          </button>
           <span className={`text-sm font-medium capitalize ${
             taskStatus === 'completed' ? 'text-green-400' :
             taskStatus === 'failed' ? 'text-red-400' :

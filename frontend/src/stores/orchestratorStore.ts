@@ -7,6 +7,7 @@ import type {
   WsMessage,
   TimelineEvent,
   UsageData,
+  TaskStatus,
 } from '../types.ts';
 
 // --- Subtask execution status ---
@@ -17,6 +18,16 @@ interface StageInfo {
   currentStage: string;
   status: string;
 }
+
+// --- Kanban column definitions ---
+export const KANBAN_COLUMNS: { key: string; label: string; statuses: TaskStatus[] }[] = [
+  { key: 'todo', label: 'TODO', statuses: ['todo'] },
+  { key: 'queued', label: 'Queued', statuses: ['queued'] },
+  { key: 'review', label: 'Need Review', statuses: ['awaiting_approval'] },
+  { key: 'running', label: 'Running', statuses: ['running', 'pending'] },
+  { key: 'failed', label: 'Failed', statuses: ['failed', 'cancelled'] },
+  { key: 'done', label: 'Done', statuses: ['completed'] },
+];
 
 // --- Store state ---
 interface OrchestratorState {
@@ -155,7 +166,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
     switch (msg.type) {
       case 'node_status':
-        // Status log messages — don't change task status, just log for debugging
         console.log(`[${msg.taskId}] ${msg.message}`);
         pushEvent(msg.taskId, msg.type, `${msg.message}`);
         break;
@@ -196,8 +206,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
       case 'approval_required':
         store.updateTaskStatus(msg.taskId, 'awaiting_approval');
-        // If there's plan data associated, it should be set via a separate setPlan call.
-        // Update the node with the pending approval message.
         set((state) => {
           const nodeMap = new Map(state.nodeMap);
           const existing = nodeMap.get(msg.taskId);
@@ -275,8 +283,37 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         });
         break;
 
+      // New project-level messages
+      case 'task_status_changed':
+        store.updateTaskStatus(msg.taskId, msg.newStatus);
+        break;
+
+      case 'project_tasks_snapshot':
+        set((state) => {
+          const nodeMap = new Map(state.nodeMap);
+          for (const task of msg.tasks) {
+            if (!nodeMap.has(task.id)) {
+              nodeMap.set(task.id, { ...task, hasPendingApproval: false });
+            }
+          }
+          // Merge with existing rootTasks (avoid duplicates)
+          const existingIds = new Set(state.rootTasks.map(t => t.id));
+          const newTasks = msg.tasks.filter(t => !existingIds.has(t.id));
+          return {
+            rootTasks: [...state.rootTasks, ...newTasks],
+            nodeMap,
+          };
+        });
+        break;
+
+      case 'task_created':
+        store.addRootTask(msg.task);
+        break;
+
       default:
-        pushEvent(msg.taskId, msg.type, msg.type);
+        if ('taskId' in msg) {
+          pushEvent((msg as { taskId: string }).taskId, (msg as { type: string }).type, (msg as { type: string }).type);
+        }
         break;
     }
   },
@@ -345,3 +382,22 @@ export const selectEventsForSelectedTask = (state: OrchestratorState): TimelineE
   const { selectedNodeId, events } = state;
   return selectedNodeId ? events.get(selectedNodeId) ?? [] : [];
 };
+
+/** Select tasks for a specific project, grouped by kanban column status. */
+export const selectTasksByProjectGrouped = (projectId: string | null) =>
+  (state: OrchestratorState) => {
+    if (!projectId) return {};
+    const tasks = state.rootTasks.filter(t => t.projectId === projectId);
+    const groups: Record<string, TaskSummary[]> = {};
+    for (const col of KANBAN_COLUMNS) {
+      groups[col.key] = tasks.filter(t => col.statuses.includes(t.status));
+    }
+    return groups;
+  };
+
+/** Select tasks for a specific project. */
+export const selectTasksByProject = (projectId: string | null) =>
+  (state: OrchestratorState): TaskSummary[] => {
+    if (!projectId) return [];
+    return state.rootTasks.filter(t => t.projectId === projectId);
+  };
