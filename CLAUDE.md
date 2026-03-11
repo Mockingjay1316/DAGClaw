@@ -83,7 +83,7 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 - `core/stageDefinitions.ts` — Built-in Plan/Execute/Verify stage configs, `formatStageDescriptions()`
 - `core/configLoader.ts` — Custom stage loading from `dagclaw.config.json`/`.ts`, stage merging
 - `core/taskOrchestrator.ts` — Pipeline driver, DAG scheduling, per-subtask stage routing, recursive decomposition
-- `core/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading
+- `core/dependencyResolver.ts` — Topological sort, cycle detection, skip cascading, upstream ancestor traversal
 - `core/runLogger.ts` — Persistent logging to `.dagclaw/runs/`
 - `core/memoryManager.ts` — Memory storage, retrieval, index generation from `.dagclaw/memory/`
 - `core/memoryDistiller.ts` — Post-run knowledge extraction: Claude summarizes run → structured memory file

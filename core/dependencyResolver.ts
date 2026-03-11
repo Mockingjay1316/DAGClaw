@@ -92,6 +92,34 @@ export function getDownstreamDependents(
   return Array.from(result);
 }
 
+/**
+ * Returns all indices that the given index transitively depends on.
+ */
+export function getUpstreamAncestors(
+  index: number,
+  entries: DependencyEntry[]
+): number[] {
+  const depsMap = new Map<number, number[]>();
+  for (const entry of entries) {
+    depsMap.set(entry.index, entry.dependencies);
+  }
+
+  const result = new Set<number>();
+  const queue = [...(depsMap.get(index) ?? [])];
+
+  while (queue.length > 0) {
+    const current = queue.pop()!;
+    if (!result.has(current)) {
+      result.add(current);
+      for (const dep of depsMap.get(current) ?? []) {
+        queue.push(dep);
+      }
+    }
+  }
+
+  return Array.from(result);
+}
+
 type SubtaskState = 'pending' | 'complete' | 'skipped';
 
 /**

@@ -249,6 +249,8 @@ Loads custom stages from `dagclaw.config.ts` (dynamic import, priority) or `dagc
   - `markComplete(index)` — marks done
   - `markSkipped(index)` — marks failed, cascades to all downstream dependents, returns cascaded indices
 - `detectCircularDependencies()` — DFS cycle detection, returns the cycle or null
+- `getDownstreamDependents(index, entries)` — BFS to find all transitively dependent indices (used by cascade-skip)
+- `getUpstreamAncestors(index, entries)` — BFS to find all transitive ancestor indices (for ancestor context injection)
 
 ### `core/taskManager.ts` — Lock, Task Factory & Registry
 

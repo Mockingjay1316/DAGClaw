@@ -4,6 +4,7 @@ import {
   DependencyResolver,
   detectCircularDependencies,
   getDownstreamDependents,
+  getUpstreamAncestors,
 } from '../dependencyResolver.ts';
 
 describe('DependencyResolver', () => {
@@ -248,5 +249,55 @@ describe('getDownstreamDependents', () => {
       { index: 3, dependencies: [1, 2] },
     ]);
     assert.deepEqual(deps.sort(), [1, 2, 3]);
+  });
+});
+
+describe('getUpstreamAncestors', () => {
+  it('returns all transitive ancestors', () => {
+    const ancestors = getUpstreamAncestors(3, [
+      { index: 0, dependencies: [] },
+      { index: 1, dependencies: [0] },
+      { index: 2, dependencies: [1] },
+      { index: 3, dependencies: [2] },
+    ]);
+    assert.deepEqual(ancestors.sort(), [0, 1, 2]);
+  });
+
+  it('returns empty for root node', () => {
+    const ancestors = getUpstreamAncestors(0, [
+      { index: 0, dependencies: [] },
+      { index: 1, dependencies: [0] },
+      { index: 2, dependencies: [1] },
+    ]);
+    assert.deepEqual(ancestors, []);
+  });
+
+  it('handles diamond correctly', () => {
+    const ancestors = getUpstreamAncestors(3, [
+      { index: 0, dependencies: [] },
+      { index: 1, dependencies: [0] },
+      { index: 2, dependencies: [0] },
+      { index: 3, dependencies: [1, 2] },
+    ]);
+    assert.deepEqual(ancestors.sort(), [0, 1, 2]);
+  });
+
+  it('returns only direct dep for single-dep node', () => {
+    const ancestors = getUpstreamAncestors(1, [
+      { index: 0, dependencies: [] },
+      { index: 1, dependencies: [0] },
+      { index: 2, dependencies: [1] },
+    ]);
+    assert.deepEqual(ancestors, [0]);
+  });
+
+  it('does not include the node itself', () => {
+    const ancestors = getUpstreamAncestors(2, [
+      { index: 0, dependencies: [] },
+      { index: 1, dependencies: [0] },
+      { index: 2, dependencies: [0, 1] },
+    ]);
+    assert.ok(!ancestors.includes(2));
+    assert.deepEqual(ancestors.sort(), [0, 1]);
   });
 });
