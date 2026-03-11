@@ -12,10 +12,10 @@ export function createTasksRouter(taskStore: TaskStore): Router {
   const rateMax = parseInt(process.env.CLAW_RATE_LIMIT_MAX || '10', 10);
   const taskLimiter = createRateLimiter({ windowMs: 60_000, max: rateMax });
 
-  // POST /api/tasks — create a new task
+  // POST /api/tasks — create a new task (backward-compatible, requires projectId)
   router.post('/api/tasks', taskLimiter, async (req: Request, res: Response) => {
     try {
-      const { prompt, workDir, pipeline, autoApprove, permissionMode } = req.body ?? {};
+      const { prompt, workDir, pipeline, autoApprove, permissionMode, projectId } = req.body ?? {};
 
       if (typeof prompt !== 'string' || prompt.trim() === '') {
         res.status(400).json({ error: 'prompt must be a non-empty string' });
@@ -29,7 +29,7 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         res.status(400).json({ error: 'workDir must be a non-empty string' });
         return;
       }
-      // Fix #3: Path traversal prevention
+      // Path traversal prevention
       const resolvedDir = resolve(workDir);
       const allowedBase = process.env.CLAW_ALLOWED_DIR || process.env.HOME || '/';
       if (!resolvedDir.startsWith(resolve(allowedBase))) {
@@ -52,27 +52,36 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         res.status(400).json({ error: `permissionMode must be one of: ${VALID_PERMISSION_MODES.join(', ')}` });
         return;
       }
+      if (typeof projectId !== 'string' || projectId.trim() === '') {
+        res.status(400).json({ error: 'projectId must be a non-empty string' });
+        return;
+      }
 
-      const id = await taskStore.createTask({ prompt, workDir: resolvedDir, pipeline, autoApprove, permissionMode });
-      res.status(201).json({ id, prompt, workDir: resolvedDir, status: 'running', runId: null });
+      const id = await taskStore.createTask({ prompt, workDir: resolvedDir, projectId, pipeline, autoApprove, permissionMode });
+      const task = taskStore.getTask(id);
+      res.status(201).json(task ? taskStore.toSummary(task) : { id, prompt, workDir: resolvedDir, status: 'queued', runId: null });
     } catch (err) {
       console.error('[tasks] Error:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  // GET /api/tasks — list all tasks
+  // GET /api/tasks — list all tasks (supports ?projectId= and ?status= filters)
   router.get('/api/tasks', async (_req: Request, res: Response) => {
     try {
-      const tasks = taskStore.listTasks();
-      const summaries = tasks.map(t => ({
-        id: t.id,
-        prompt: t.prompt,
-        workDir: t.workDir,
-        status: t.status,
-        runId: t.runId,
-        error: t.error,
-      }));
+      let tasks = taskStore.listTasks();
+
+      const projectId = _req.query.projectId as string | undefined;
+      if (projectId) {
+        tasks = tasks.filter(t => t.projectId === projectId);
+      }
+
+      const status = _req.query.status as string | undefined;
+      if (status) {
+        tasks = tasks.filter(t => t.status === status);
+      }
+
+      const summaries = tasks.map(t => taskStore.toSummary(t));
       res.status(200).json(summaries);
     } catch (err) {
       console.error('[tasks] Error:', err);
@@ -90,12 +99,7 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         return;
       }
       res.status(200).json({
-        id: task.id,
-        prompt: task.prompt,
-        workDir: task.workDir,
-        status: task.status,
-        runId: task.runId,
-        error: task.error,
+        ...taskStore.toSummary(task),
         hasPendingApproval: !!task.pendingApproval,
         pendingApprovalMessage: task.pendingApproval?.message,
       });
@@ -225,6 +229,23 @@ export function createTasksRouter(taskStore: TaskStore): Router {
         return;
       }
       res.status(201).json({ id: result.newId });
+    } catch (err) {
+      console.error('[tasks] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/tasks/:id/execute — move TODO task to queued
+  router.post('/api/tasks/:id/execute', async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const result = taskStore.executeTask(id);
+      if (result.error) {
+        res.status(result.status!).json({ error: result.error });
+        return;
+      }
+      const task = taskStore.getTask(id);
+      res.status(200).json(task ? taskStore.toSummary(task) : { id, status: 'queued' });
     } catch (err) {
       console.error('[tasks] Error:', err);
       res.status(500).json({ error: 'Internal server error' });

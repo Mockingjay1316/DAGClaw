@@ -12,19 +12,23 @@ import type { RunManifest } from '../../core/types.ts';
 
 // ── Mock TaskStore ──────────────────────────────────────────────────────────
 
+const TEST_PROJECT_ID = 'test-project-1';
+
 function createMockTaskStore() {
   const tasks = new Map<string, any>();
 
   return {
-    async createTask(opts: { prompt: string; workDir: string }): Promise<string> {
+    async createTask(opts: { prompt: string; workDir: string; projectId: string }): Promise<string> {
       const id = 'task-' + (tasks.size + 1);
       tasks.set(id, {
         id,
         prompt: opts.prompt,
         workDir: opts.workDir,
+        projectId: opts.projectId,
         status: 'running',
         runId: null,
         orchestrator: null,
+        createdAt: new Date().toISOString(),
       });
       return id;
     },
@@ -35,6 +39,19 @@ function createMockTaskStore() {
 
     listTasks() {
       return Array.from(tasks.values());
+    },
+
+    toSummary(task: any) {
+      return {
+        id: task.id,
+        prompt: task.prompt,
+        workDir: task.workDir,
+        projectId: task.projectId,
+        status: task.status,
+        runId: task.runId,
+        error: task.error,
+        createdAt: task.createdAt,
+      };
     },
 
     approveTask(id: string): boolean {
@@ -58,6 +75,13 @@ function createMockTaskStore() {
       return true;
     },
 
+    executeTask(id: string): { error?: string; status?: number } {
+      const task = tasks.get(id);
+      if (!task) return { error: 'Task not found', status: 404 };
+      task.status = 'queued';
+      return {};
+    },
+
     async retryTask(id: string): Promise<{ newId: string } | { error: string; status: number }> {
       const task = tasks.get(id);
       if (!task) return { error: 'Task not found', status: 404 };
@@ -67,9 +91,11 @@ function createMockTaskStore() {
         id: newId,
         prompt: task.prompt,
         workDir: task.workDir,
+        projectId: task.projectId,
         status: 'running',
         runId: null,
         orchestrator: null,
+        createdAt: new Date().toISOString(),
       });
       return { newId };
     },
@@ -187,7 +213,7 @@ describe('Task routes', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 201);
     const body = await res.json();
@@ -202,11 +228,10 @@ describe('Task routes', () => {
   });
 
   it('GET /api/tasks/:id → 200 with task detail', async () => {
-    // Create a task first so we know the id
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'detail test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'detail test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
 
@@ -228,7 +253,7 @@ describe('Task routes', () => {
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'approve test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'approve test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
 
@@ -242,7 +267,7 @@ describe('Task routes', () => {
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'reject test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'reject test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
 
@@ -260,7 +285,7 @@ describe('Task routes', () => {
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'cancel test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'cancel test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
 
@@ -278,7 +303,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workDir: testWorkDir }),
+      body: JSON.stringify({ workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
     const body = await res.json();
@@ -290,7 +315,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: '', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: '', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
   });
@@ -299,7 +324,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test' }),
+      body: JSON.stringify({ prompt: 'test', projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
   });
@@ -308,7 +333,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: '' }),
+      body: JSON.stringify({ prompt: 'test', workDir: '', projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
   });
@@ -317,7 +342,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 123, workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 123, workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
   });
@@ -326,7 +351,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, pipeline: 'not-array' }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID, pipeline: 'not-array' }),
     });
     assert.equal(res.status, 400);
   });
@@ -335,7 +360,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, autoApprove: 'yes' }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID, autoApprove: 'yes' }),
     });
     assert.equal(res.status, 400);
   });
@@ -344,7 +369,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, permissionMode: 'yolo' }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID, permissionMode: 'yolo' }),
     });
     assert.equal(res.status, 201);
     const body = await res.json();
@@ -355,7 +380,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, permissionMode: 'invalid' }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID, permissionMode: 'invalid' }),
     });
     assert.equal(res.status, 400);
     const body = await res.json();
@@ -366,7 +391,7 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, permissionMode: 'auto-approve', autoApprove: false }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID, permissionMode: 'auto-approve', autoApprove: false }),
     });
     assert.equal(res.status, 201);
     const body = await res.json();
@@ -377,11 +402,22 @@ describe('Task input validation', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, pipeline: ['Plan', 'Execute'], autoApprove: true }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir, projectId: TEST_PROJECT_ID, pipeline: ['Plan', 'Execute'], autoApprove: true }),
     });
     assert.equal(res.status, 201);
     const body = await res.json();
     assert.ok(body.id);
+  });
+
+  it('POST /api/tasks with missing projectId returns 400', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /projectId/i);
   });
 });
 
@@ -392,7 +428,7 @@ describe('Path traversal prevention', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: '/etc' }),
+      body: JSON.stringify({ prompt: 'test', workDir: '/etc', projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
     const body = await res.json();
@@ -403,7 +439,7 @@ describe('Path traversal prevention', () => {
     const res = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir + '/../../etc' }),
+      body: JSON.stringify({ prompt: 'test', workDir: testWorkDir + '/../../etc', projectId: TEST_PROJECT_ID }),
     });
     assert.equal(res.status, 400);
     const body = await res.json();
@@ -501,11 +537,10 @@ describe('Run history routes', () => {
 
 describe('Task usage routes', () => {
   it('GET /api/tasks/:id/usage → 200 with usage data when task has runId', async () => {
-    // Create a task and manually set its runId and workDir to point to our temp fixture
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'usage test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'usage test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
     // Directly set the task's runId and workDir on the mock store
@@ -531,11 +566,10 @@ describe('Task usage routes', () => {
   });
 
   it('GET /api/tasks/:id/usage → 404 when task has no runId', async () => {
-    // Create a task (default runId is null)
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'no-run test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'no-run test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
 
@@ -550,11 +584,10 @@ describe('Task usage routes', () => {
 
 describe('Task retry routes', () => {
   it('POST /api/tasks/:id/retry → 201 with new task id when original task is failed', async () => {
-    // Create a task and manually set its status to failed
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'retry test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'retry test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
     mockStore.getTask(id).status = 'failed';
@@ -574,11 +607,10 @@ describe('Task retry routes', () => {
   });
 
   it('POST /api/tasks/:id/retry → 400 when task is still running', async () => {
-    // Create a task (default status is 'running')
     const createRes = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'running retry test', workDir: testWorkDir }),
+      body: JSON.stringify({ prompt: 'running retry test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
     });
     const { id } = await createRes.json();
 
@@ -587,5 +619,30 @@ describe('Task retry routes', () => {
     const body = await res.json();
     assert.ok(body.error, 'should have error message');
     assert.match(body.error, /running/i, 'error should mention task is still running');
+  });
+});
+
+// ── Task execute endpoint ──────────────────────────────────────────────────
+
+describe('Task execute endpoint', () => {
+  it('POST /api/tasks/:id/execute → 200 when task exists', async () => {
+    const createRes = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'execute test', workDir: testWorkDir, projectId: TEST_PROJECT_ID }),
+    });
+    const { id } = await createRes.json();
+    // Set it back to "todo" for the execute test
+    mockStore.getTask(id).status = 'todo';
+
+    const res = await fetch(`${baseUrl}/api/tasks/${id}/execute`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.status, 'queued');
+  });
+
+  it('POST /api/tasks/:id/execute → 404 when task not found', async () => {
+    const res = await fetch(`${baseUrl}/api/tasks/nonexistent/execute`, { method: 'POST' });
+    assert.equal(res.status, 404);
   });
 });

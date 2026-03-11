@@ -10,6 +10,9 @@ export interface TaskStoreRef {
   approveTask(id: string): void;
   rejectTask(id: string, feedback?: string): void;
   cancelTask(id: string): void;
+  executeTask(id: string): { error?: string; status?: number };
+  getTasksByProject(projectId: string): unknown[];
+  toSummary(task: unknown): Record<string, unknown>;
 }
 
 /**
@@ -19,6 +22,7 @@ export interface TaskStoreRef {
 export class WsServer {
   private wss: WebSocketServer;
   private subscriptions = new SubscriptionManager();
+  private projectSubscriptions = new SubscriptionManager();
   private buffers = new Map<string, MessageBuffer>();
   private clients = new Map<string, WebSocket>();
   private taskStore: TaskStoreRef | null = null;
@@ -105,8 +109,20 @@ export class WsServer {
   /** Broadcast a message to ALL connected clients (for global events). */
   broadcastAll(message: Record<string, unknown>): void {
     const payload = JSON.stringify(message);
-    for (const ws of this.clients.values()) {
+    for (const [clientId, ws] of this.clients.entries()) {
       if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+      }
+    }
+  }
+
+  /** Broadcast to all clients subscribed to a specific project. */
+  broadcastProject(projectId: string, message: Record<string, unknown>): void {
+    const subscribers = this.projectSubscriptions.getSubscribers(projectId);
+    const payload = JSON.stringify(message);
+    for (const clientId of subscribers) {
+      const ws = this.clients.get(clientId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
       }
     }
@@ -164,6 +180,33 @@ export class WsServer {
         this.subscriptions.unsubscribe(clientId, nodeIds);
         break;
       }
+      case 'subscribe_project': {
+        if (typeof msg.projectId !== 'string') {
+          console.warn('[WsServer] Invalid subscribe_project: projectId must be a string');
+          return;
+        }
+        const projectId = msg.projectId as string;
+        this.projectSubscriptions.subscribe(clientId, [projectId]);
+        // Send current project tasks snapshot
+        if (this.taskStore) {
+          const tasks = this.taskStore.getTasksByProject(projectId);
+          const summaries = tasks.map(t => this.taskStore!.toSummary(t));
+          ws.send(JSON.stringify({
+            type: 'project_tasks_snapshot',
+            projectId,
+            tasks: summaries,
+          }));
+        }
+        break;
+      }
+      case 'unsubscribe_project': {
+        if (typeof msg.projectId !== 'string') {
+          console.warn('[WsServer] Invalid unsubscribe_project: projectId must be a string');
+          return;
+        }
+        this.projectSubscriptions.unsubscribe(clientId, [msg.projectId as string]);
+        break;
+      }
       case 'approve_plan': {
         if (typeof msg.taskId !== 'string') {
           console.warn('[WsServer] Invalid message: taskId must be a string, got:', typeof msg.taskId);
@@ -188,6 +231,14 @@ export class WsServer {
         this.taskStore?.cancelTask(msg.taskId as string);
         break;
       }
+      case 'execute_task': {
+        if (typeof msg.taskId !== 'string') {
+          console.warn('[WsServer] Invalid execute_task: taskId must be a string');
+          return;
+        }
+        this.taskStore?.executeTask(msg.taskId as string);
+        break;
+      }
       default: {
         console.warn('[WsServer] Unknown message type:', msg.type);
       }
@@ -196,6 +247,7 @@ export class WsServer {
 
   private cleanup(clientId: string): void {
     this.subscriptions.removeClient(clientId);
+    this.projectSubscriptions.removeClient(clientId);
     this.clients.delete(clientId);
   }
 }

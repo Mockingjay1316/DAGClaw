@@ -2,22 +2,25 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { TaskStore, ManagedTask, mapPermissionMode } from '../src/taskStore.ts';
 
+const PROJECT_ID = 'test-project-id';
+
 describe('TaskStore', () => {
   it('createTask returns a task id string', async () => {
     const store = new TaskStore();
-    const id = await store.createTask({ prompt: 'test task', workDir: '/tmp' });
+    const id = await store.createTask({ prompt: 'test task', workDir: '/tmp', projectId: PROJECT_ID });
     assert.equal(typeof id, 'string');
     assert.ok(id.length > 0);
   });
 
   it('getTask returns the created task', async () => {
     const store = new TaskStore();
-    const id = await store.createTask({ prompt: 'hello', workDir: '/tmp' });
+    const id = await store.createTask({ prompt: 'hello', workDir: '/tmp', projectId: PROJECT_ID });
     const task = store.getTask(id);
     assert.ok(task);
     assert.equal(task.id, id);
     assert.equal(task.prompt, 'hello');
     assert.equal(task.workDir, '/tmp');
+    assert.equal(task.projectId, PROJECT_ID);
   });
 
   it('getTask returns undefined for non-existent id', () => {
@@ -27,8 +30,8 @@ describe('TaskStore', () => {
 
   it('listTasks returns all tasks', async () => {
     const store = new TaskStore();
-    const id1 = await store.createTask({ prompt: 'task 1', workDir: '/tmp' });
-    const id2 = await store.createTask({ prompt: 'task 2', workDir: '/tmp' });
+    const id1 = await store.createTask({ prompt: 'task 1', workDir: '/tmp', projectId: PROJECT_ID });
+    const id2 = await store.createTask({ prompt: 'task 2', workDir: '/tmp', projectId: PROJECT_ID });
     const tasks = store.listTasks();
     assert.equal(tasks.length, 2);
     const ids = tasks.map(t => t.id);
@@ -38,22 +41,21 @@ describe('TaskStore', () => {
 
   it('approveTask resolves pending approval', () => {
     const store = new TaskStore();
-    // Manually insert a task with pendingApproval to test approval flow
-    // without needing a real orchestrator
     let resolved: boolean | undefined;
     const task: ManagedTask = {
       id: 'test-approve',
       prompt: 'approve me',
       workDir: '/tmp',
+      projectId: PROJECT_ID,
       runId: null,
-      status: 'pending',
+      status: 'awaiting_approval',
       orchestrator: null,
+      createdAt: new Date().toISOString(),
       pendingApproval: {
         resolve: (val: boolean) => { resolved = val; },
         message: 'Please approve',
       },
     };
-    // Access private map via any cast
     (store as any).tasks.set('test-approve', task);
 
     const result = store.approveTask('test-approve');
@@ -70,9 +72,11 @@ describe('TaskStore', () => {
       id: 'test-reject',
       prompt: 'reject me',
       workDir: '/tmp',
+      projectId: PROJECT_ID,
       runId: null,
-      status: 'pending',
+      status: 'awaiting_approval',
       orchestrator: null,
+      createdAt: new Date().toISOString(),
       pendingApproval: {
         resolve: (val: boolean) => { resolved = val; },
         message: 'Please approve',
@@ -94,9 +98,11 @@ describe('TaskStore', () => {
       id: 'test-cancel',
       prompt: 'cancel me',
       workDir: '/tmp',
+      projectId: PROJECT_ID,
       runId: null,
       status: 'running',
       orchestrator: { shutdown: () => { shutdownCalled = true; } } as any,
+      createdAt: new Date().toISOString(),
     };
     (store as any).tasks.set('test-cancel', task);
 
@@ -124,7 +130,6 @@ describe('TaskStore', () => {
   it('constructor accepts custom stages and passes them to orchestrator', () => {
     const customStages = { 'Lint': {} as any };
     const store = new TaskStore(customStages);
-    // Verify the store was constructed without errors and stores the reference
     assert.ok(store);
     assert.equal((store as any).customStagesRef, customStages);
   });
@@ -135,12 +140,82 @@ describe('TaskStore', () => {
       id: 'no-approval',
       prompt: 'test',
       workDir: '/tmp',
+      projectId: PROJECT_ID,
       runId: null,
       status: 'running',
       orchestrator: null,
+      createdAt: new Date().toISOString(),
     };
     (store as any).tasks.set('no-approval', task);
     assert.equal(store.approveTask('no-approval'), false);
+  });
+
+  it('createTodoTask creates a task with todo status', () => {
+    const store = new TaskStore();
+    const id = store.createTodoTask({
+      projectId: PROJECT_ID,
+      prompt: 'todo task',
+      workDir: '/tmp',
+    });
+    const task = store.getTask(id);
+    assert.ok(task);
+    assert.equal(task.status, 'todo');
+    assert.equal(task.projectId, PROJECT_ID);
+    assert.equal(task.prompt, 'todo task');
+  });
+
+  it('getTasksByProject filters by project', async () => {
+    const store = new TaskStore();
+    store.createTodoTask({ projectId: 'proj-a', prompt: 'a1', workDir: '/tmp' });
+    store.createTodoTask({ projectId: 'proj-b', prompt: 'b1', workDir: '/tmp' });
+    store.createTodoTask({ projectId: 'proj-a', prompt: 'a2', workDir: '/tmp' });
+
+    const projATasks = store.getTasksByProject('proj-a');
+    assert.equal(projATasks.length, 2);
+    assert.ok(projATasks.every(t => t.projectId === 'proj-a'));
+
+    const projBTasks = store.getTasksByProject('proj-b');
+    assert.equal(projBTasks.length, 1);
+  });
+
+  it('getTasksByStatus filters by status', () => {
+    const store = new TaskStore();
+    store.createTodoTask({ projectId: PROJECT_ID, prompt: 'todo1', workDir: '/tmp' });
+    store.createTodoTask({ projectId: PROJECT_ID, prompt: 'todo2', workDir: '/tmp' });
+
+    const todos = store.getTasksByStatus('todo');
+    assert.equal(todos.length, 2);
+    assert.ok(todos.every(t => t.status === 'todo'));
+  });
+
+  it('toSummary returns correct shape', () => {
+    const store = new TaskStore();
+    const id = store.createTodoTask({ projectId: PROJECT_ID, prompt: 'test', workDir: '/tmp' });
+    const task = store.getTask(id)!;
+    const summary = store.toSummary(task);
+
+    assert.equal(summary.id, id);
+    assert.equal(summary.prompt, 'test');
+    assert.equal(summary.projectId, PROJECT_ID);
+    assert.equal(summary.status, 'todo');
+    assert.equal(summary.runId, null);
+    assert.ok('createdAt' in summary);
+  });
+
+  it('registerTask inserts a pre-built task', () => {
+    const store = new TaskStore();
+    const task: ManagedTask = {
+      id: 'restored-task',
+      prompt: 'from disk',
+      workDir: '/tmp',
+      projectId: PROJECT_ID,
+      runId: 'run-123',
+      status: 'completed',
+      orchestrator: null,
+      createdAt: new Date().toISOString(),
+    };
+    store.registerTask(task);
+    assert.equal(store.getTask('restored-task')?.prompt, 'from disk');
   });
 });
 

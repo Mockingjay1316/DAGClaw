@@ -3,9 +3,13 @@ import cors from 'cors';
 import http from 'node:http';
 import { WsServer } from './websocket/wsServer.ts';
 import { TaskStore } from './taskStore.ts';
+import { TaskScheduler } from './taskScheduler.ts';
+import { ProjectStore } from './projectStore.ts';
+import { restoreState } from './stateRestorer.ts';
 import { createTasksRouter } from './routes/tasks.ts';
 import { createStagesRouter } from './routes/stages.ts';
 import { createRunsRouter } from './routes/runs.ts';
+import { createProjectsRouter } from './routes/projects.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import type { StageDefinition } from '../../core/types.ts';
 
@@ -39,14 +43,34 @@ app.use('/api', authMiddleware);
 
 const customStages: Record<string, StageDefinition> = {};
 const taskStore = new TaskStore(customStages);
+const taskScheduler = new TaskScheduler();
+const projectStore = new ProjectStore();
 const server = http.createServer(app);
 const wsServer = new WsServer(server);
 
+// Wire up components
 taskStore.setWsServer(wsServer);
+taskStore.setScheduler(taskScheduler);
 wsServer.setTaskStore(taskStore);
+
+// Scheduler starts tasks via taskStore
+taskScheduler.onStart(async (taskId) => {
+  await taskStore.startTask(taskId);
+});
+
+// Restore state from disk
+const projects = projectStore.listProjects();
+if (projects.length > 0) {
+  console.log(`[startup] Restoring state for ${projects.length} project(s)...`);
+  const results = restoreState(projects, taskStore);
+  for (const r of results) {
+    console.log(`[startup] ${r.projectName}: ${r.todoCount} TODO, ${r.completedCount} completed, ${r.failedCount} failed, ${r.interruptedCount} interrupted`);
+  }
+}
 
 app.use(createTasksRouter(taskStore));
 app.use(createStagesRouter(customStages));
+app.use(createProjectsRouter(projectStore, taskStore));
 
 const runsWorkDir = process.env.CLAW_ALLOWED_DIR || process.env.HOME || '/tmp';
 app.use(createRunsRouter(runsWorkDir));
@@ -66,7 +90,7 @@ function gracefulShutdown() {
   // Cancel all running tasks
   const tasks = taskStore.listTasks();
   for (const task of tasks) {
-    if (task.status === 'running' || task.status === 'pending') {
+    if (task.status === 'running' || task.status === 'queued' || task.status === 'awaiting_approval') {
       taskStore.cancelTask(task.id);
     }
   }
