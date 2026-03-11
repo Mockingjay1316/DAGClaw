@@ -105,8 +105,7 @@ function restoreRunTasks(
     const runDirs = fs.readdirSync(runsDir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => d.name)
-      .sort()
-      .reverse(); // Most recent first
+      .sort(); // Chronological: older runs get lower task numbers
 
     for (const runId of runDirs) {
       const manifestPath = path.join(runsDir, runId, 'manifest.json');

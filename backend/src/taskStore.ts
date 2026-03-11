@@ -247,6 +247,9 @@ export class TaskStore {
 
   /** Register a pre-built ManagedTask (used by state restoration). */
   registerTask(task: ManagedTask): void {
+    if (task.taskNumber === 0) {
+      task.taskNumber = this.nextTaskNumber++;
+    }
     this.tasks.set(task.id, task);
     if (task.taskNumber >= this.nextTaskNumber) {
       this.nextTaskNumber = task.taskNumber + 1;

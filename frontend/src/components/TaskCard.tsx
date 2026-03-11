@@ -106,8 +106,10 @@ export function TaskCard({ task }: TaskCardProps) {
       } ${isSelected ? 'ring-1 ring-blue-500 bg-gray-700' : ''}`}
     >
       {/* Task number */}
-      {task.taskNumber && (
-        <div className="text-xs text-gray-500 font-mono mb-1">#{task.taskNumber}</div>
+      {task.taskNumber != null && task.taskNumber > 0 && (
+        <span className="inline-block text-[10px] text-gray-400 font-mono px-1.5 py-0.5 mb-1 rounded-full bg-gray-700/50 border border-gray-600/50">
+          #{task.taskNumber}
+        </span>
       )}
       <div className="flex items-start gap-2">
         <span className={`w-2 h-2 rounded-full shrink-0 mt-1 ${statusDots[task.status] || 'bg-gray-500'}`} />
