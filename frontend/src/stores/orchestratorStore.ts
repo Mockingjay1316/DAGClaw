@@ -87,6 +87,10 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     set((state) => {
       const nodeMap = new Map(state.nodeMap);
       nodeMap.set(task.id, { ...task, hasPendingApproval: false });
+      // Guard: skip adding if task already exists in rootTasks
+      if (state.rootTasks.some(t => t.id === task.id)) {
+        return { nodeMap };
+      }
       return { rootTasks: [...state.rootTasks, task], nodeMap };
     }),
 
@@ -154,6 +158,11 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       set((state) => {
         const events = new Map(state.events);
         const taskEvents = [...(events.get(taskId) ?? [])];
+        // Dedup: skip if any of the last 5 events has the same type AND message
+        const recentEvents = taskEvents.slice(-5);
+        if (recentEvents.some(e => e.type === type && e.message === message)) {
+          return { events };
+        }
         const event: TimelineEvent = { timestamp: Date.now(), type, taskId, message, data };
         taskEvents.push(event);
         if (taskEvents.length > 500) {
@@ -252,13 +261,21 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           if (existing) {
             nodeMap.set(msg.taskId, { ...existing, status: 'failed', error: msg.error });
           }
-          return { nodeMap };
+          const stageInfo = new Map(state.stageInfo);
+          const existingSi = stageInfo.get(msg.taskId);
+          stageInfo.set(msg.taskId, { currentStage: existingSi?.currentStage ?? 'Failed', status: 'failed' });
+          return { nodeMap, stageInfo };
         });
         pushEvent(msg.taskId, msg.type, `Task error: ${msg.error}`);
         break;
 
       case 'task_complete':
         store.updateTaskStatus(msg.taskId, 'completed');
+        set((state) => {
+          const stageInfo = new Map(state.stageInfo);
+          stageInfo.set(msg.taskId, { currentStage: 'Done', status: 'completed' });
+          return { stageInfo };
+        });
         pushEvent(msg.taskId, msg.type, `Task completed`);
         break;
 

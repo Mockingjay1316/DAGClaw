@@ -155,9 +155,12 @@ export class WsServer {
           console.warn('[WsServer] Subscription array too large:', nodeIds.length);
           return;
         }
+        // Determine which nodeIds are truly new for this client
+        const existingSubs = this.subscriptions.getSubscriptions(clientId);
+        const newNodeIds = nodeIds.filter(id => !existingSubs.has(id));
         this.subscriptions.subscribe(clientId, nodeIds);
-        // Send buffered messages for each subscribed node
-        for (const nodeId of nodeIds) {
+        // Only replay buffered messages for newly subscribed nodes
+        for (const nodeId of newNodeIds) {
           const buffer = this.buffers.get(nodeId);
           if (buffer) {
             for (const buffered of buffer.getAll()) {
