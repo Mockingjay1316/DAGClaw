@@ -255,16 +255,22 @@ Loads custom stages from `dagclaw.config.ts` (dynamic import, priority) or `dagc
 
 ### `core/taskManager.ts` — Lock, Task Factory & Registry
 
-- `acquireLock(workDir, runId)` — creates `.dagclaw/lock` with PID. Throws if another instance is running.
+**Lockfile management (production):**
+- `acquireLock(workDir, runId)` — creates `.dagclaw/lock` with PID. Throws if another instance is running. Note: has a TOCTOU race (check-then-write) — fine for CLI, needs atomic locking for server-spawned multi-run.
 - `releaseLock(workDir)` — removes the lock file
 - `checkStaleLock(workDir)` — detects lock from a dead process (checks `process.kill(pid, 0)`), cleans up
+
+**Task tracking (test-only, reserved for future multi-run):**
 - `createTaskNode(options)` — factory for TaskNode objects
+- `ensureWorkDir(workDir)` — creates work directory if needed
 - `TaskRegistry` — tracks parent/child relationships:
   - `register(node)` / `getNode(id)` — store and retrieve by ID
   - `addChild(parentId, childNode)` — links parent and child
   - `getChildren(id)` / `getDescendants(id)` — direct children vs BFS all descendants
   - `getDepth(id)` — walks parentId chain (root = 0)
   - `checkDepthLimit(parentId, maxDepth)` — guard against infinite recursion
+
+**Future direction**: Multi-run support via git worktrees. Each run gets an isolated worktree (`git worktree add .dagclaw/worktrees/<runId>`), eliminating file-level conflicts. `TaskRegistry` would be repurposed as a `RunRegistry` to track active runs, their worktrees, and status. Lock scope would shift from per-project to per-worktree.
 
 ### `core/runLogger.ts` — Persistent Logging
 

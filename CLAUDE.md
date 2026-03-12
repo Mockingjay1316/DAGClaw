@@ -87,7 +87,7 @@ Note: Node.js is installed via nvm. If `node` is not on PATH, run `source ~/.nvm
 - `core/runLogger.ts` — Persistent logging to `.dagclaw/runs/`
 - `core/memoryManager.ts` — Memory storage, retrieval, index generation from `.dagclaw/memory/`
 - `core/memoryDistiller.ts` — Post-run knowledge extraction: Claude summarizes run → structured memory file
-- `core/taskManager.ts` — Lockfile management, task node creation, `TaskRegistry` for parent/child tracking
+- `core/taskManager.ts` — Lockfile management (production), `TaskRegistry`/`createTaskNode` (test-only, reserved for future multi-run management)
 - `core/promptBuilder.ts` — Template interpolation (`{{key}}` replacement)
 - `cli/cli.ts` — CLI entry point, arg parsing, terminal output
 - `cli/dagDisplay.ts` — Live DAG status display (TTY ANSI in-place updates, non-TTY fallback), stage ticker
