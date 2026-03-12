@@ -747,7 +747,7 @@ Rather than adding heavy structural annotations (like `touchesFiles` fields), we
 
 3. **Global concurrency semaphore**: `MAX_CONCURRENT_INSTANCES` (default 5) caps total parallel Claude Code instances across all nodes. Prevents resource exhaustion.
 
-4. **Git worktree isolation** (future enhancement): for subtasks that truly need to modify overlapping files in parallel, each can run in a git worktree and changes are merged afterward. Deferred — the Plan stage's dependency annotation is sufficient for v0.1.0.
+4. **Git worktree isolation** (future enhancement): for subtasks that truly need to modify overlapping files in parallel, each can run in a git worktree and changes are merged afterward. Deferred — the Plan stage's dependency annotation is sufficient for v0.1.0. Note: memory (`.dagclaw/memory/`) is project-level and shared across worktrees — worktrees isolate code, not knowledge. Memory files are named by runId so concurrent writes don't collide.
 
 ### Why this is minimal
 

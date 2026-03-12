@@ -88,7 +88,7 @@ TaskOrchestrator.run()
 │
 ├─ 6. memory.buildContextBlock()
 │     → reads .dagclaw/memory/*.md
-│     → returns "--- Project Memory ---\n## file.md\n<content>\n..."
+│     → returns "--- Project Memory ---\n### file.md\n<content>\n..."
 │
 ├─ 7. Build PipelineState (mutable, flows through all stages)
 │     ┌─ PipelineState ──────────────────────────────────────┐
@@ -473,7 +473,7 @@ every stage prompt, and writes new knowledge after successful runs. Two tiers: *
                     │                     │ → {{memoryContext}} interpolation
                     │                     ▼
                     │              ┌──────────────┐
-                    │              │ Every Claude  │  (Plan, Execute, Verify)
+                    │              │ Every Claude  │  (Plan, Execute — NOT Verify)
                     │              │ invocation    │  receives memory in
                     │              │ system prompt │  its prompt context
                     │              └──────────────┘
@@ -512,7 +512,7 @@ TaskOrchestrator.run()
 │
 ├─ 1. Check !opts.noMemory                      (--no-memory flag disables)
 │
-├─ 2. memory.buildContextBlock()                 (memoryManager.ts:109)
+├─ 2. memory.buildContextBlock()
 │     │
 │     ├─ readAll()                               (memoryManager.ts:21)
 │     │   ├─ listFiles()                         → readdirSync, filter *.md, sort
@@ -818,6 +818,13 @@ Post-completion:                         | <runId-1>.md | Title | One-liner... |
 v0.2 (future): Two-phase retrieval replaces full context dump:
   index one-liners → select ~100 → read summaries → narrow ~10-20 → compose context
   readSummaries() already provides the MemoryEntry[] needed for this flow.
+
+Concurrency with git worktrees:
+  Memory is project-level, NOT per-worktree. MemoryManager always reads/writes
+  the main repo's .dagclaw/memory/. Safe because:
+  - filenames are runId-based (no write collisions)
+  - buildContextBlock() snapshots once at run start (immutable during run)
+  - updateIndex() is a full rewrite from readSummaries() (last-writer-wins is benign)
 ```
 
 ## File System Layout

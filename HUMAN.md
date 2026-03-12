@@ -329,6 +329,10 @@ interface MemoryEntry {
 
 **Memory injection path:** `taskOrchestrator.ts` calls `buildContextBlock()` once at pipeline start → stored in `state.memoryContext` (immutable for entire run) → injected into Plan and Execute stages via `{{memoryContext}}` template interpolation. Verify stage does NOT receive memory.
 
+**Concurrency with git worktrees:** Memory is project-level, not per-worktree. When running concurrent tasks in git worktrees, `MemoryManager` always points to the main repo's `.dagclaw/memory/`, not the worktree's. This is safe because: (1) memory files are named by runId (timestamp-prefixed UUIDs), so concurrent writes never collide; (2) `buildContextBlock()` snapshots memory once at run start, so mid-run writes from other runs don't affect the current run; (3) `updateIndex()` is a full rewrite from `readSummaries()`, so last-writer-wins is benign. Worktrees isolate code, not knowledge.
+
+**Future direction:** A global-level memory (`~/.dagclaw/memory/`) could accumulate cross-project knowledge (e.g., user conventions, toolchain preferences). Not yet planned.
+
 ## How to Add a Custom Stage
 
 **Option A: Config file (declarative)**
