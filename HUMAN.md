@@ -234,7 +234,7 @@ All stage-specific logic lives here. The orchestrator imports `getStageDefinitio
 - System prompt: review code, run tests, check each subtask
 - `contextBuilder`: includes plan summary, all subtask summaries, skipped indices
 - `resultHandler`: receives validated verification result, sets `state.verification`
-- `resultInterpreter`: extracts failed indices where `retryRecommended: true`
+- `resultInterpreter` (`verifyResultInterpreter`): overrides Claude's `overallPass` — any subtask failed OR skipped OR integration failed = fail. `failedIndices` includes both `retryRecommended: true` subtasks and `skippedIndices` (treated as needing retry)
 - `retryStage: "Execute"` — on failure, re-run Execute for failed subtasks
 - `maxRetries: 2`
 
