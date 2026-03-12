@@ -4,7 +4,7 @@ import path from 'node:path';
 import { TaskOrchestrator, OrchestratorCallbacks } from '../../core/taskOrchestrator.ts';
 import type { CliOptions, DAGEvent, Plan, StageDefinition, PermissionMode } from '../../core/types.ts';
 import { RunLogger } from '../../core/runLogger.ts';
-import { mergeStages } from '../../core/configLoader.ts';
+import { mergeStages, loadCustomStages } from '../../core/configLoader.ts';
 import { BUILTIN_STAGES } from '../../core/stageDefinitions.ts';
 import type { WsServer } from './websocket/wsServer.ts';
 import type { TaskScheduler } from './taskScheduler.ts';
@@ -81,8 +81,9 @@ export class TaskStore {
   private wsServer: WsServer | null = null;
   private scheduler: TaskScheduler | null = null;
   private nextTaskNumber = 1;
+  private projectStages = new Map<string, Record<string, StageDefinition>>();
 
-  constructor(private customStagesRef?: Record<string, StageDefinition>) {}
+  constructor() {}
 
   /** Store reference to WsServer for broadcasting. */
   setWsServer(ws: WsServer): void {
@@ -92,6 +93,22 @@ export class TaskStore {
   /** Store reference to TaskScheduler. */
   setScheduler(scheduler: TaskScheduler): void {
     this.scheduler = scheduler;
+  }
+
+  /** Load custom stages from a project's dagclaw.config.ts/.json and cache them.
+   *  Returns silently if no config file exists. Logs error if config is malformed. */
+  async loadProjectStages(projectPath: string): Promise<void> {
+    const custom = await loadCustomStages(projectPath);
+    if (Object.keys(custom).length > 0) {
+      this.projectStages.set(projectPath, custom);
+      console.log(`[taskStore] Loaded ${Object.keys(custom).length} custom stage(s) for ${projectPath}`);
+    }
+  }
+
+  /** Get the merged stage registry for a project (builtins + project custom stages). */
+  getStageRegistry(projectPath: string): Record<string, StageDefinition> | undefined {
+    const custom = this.projectStages.get(projectPath);
+    return custom ? mergeStages(BUILTIN_STAGES, custom) : undefined;
   }
 
   /** Create a TODO task (not yet executed). Persists to .dagclaw/tasks.json. */
@@ -189,9 +206,7 @@ export class TaskStore {
 
     const callbacks = this.buildCallbacks(task);
 
-    const stageRegistry = this.customStagesRef
-      ? mergeStages(BUILTIN_STAGES, this.customStagesRef)
-      : undefined;
+    const stageRegistry = this.getStageRegistry(task.workDir);
 
     const orchestrator = new TaskOrchestrator(
       cliOpts,

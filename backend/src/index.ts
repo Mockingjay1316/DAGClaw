@@ -11,7 +11,6 @@ import { createStagesRouter } from './routes/stages.ts';
 import { createRunsRouter } from './routes/runs.ts';
 import { createProjectsRouter } from './routes/projects.ts';
 import { authMiddleware } from './middleware/auth.ts';
-import type { StageDefinition } from '../../core/types.ts';
 
 const app = express();
 
@@ -41,8 +40,7 @@ app.use(express.json({ limit: '100kb' }));
 // Fix #1: API key authentication
 app.use('/api', authMiddleware);
 
-const customStages: Record<string, StageDefinition> = {};
-const taskStore = new TaskStore(customStages);
+const taskStore = new TaskStore();
 const taskScheduler = new TaskScheduler();
 const projectStore = new ProjectStore();
 const server = http.createServer(app);
@@ -66,10 +64,16 @@ if (projects.length > 0) {
   for (const r of results) {
     console.log(`[startup] ${r.projectName}: ${r.todoCount} TODO, ${r.completedCount} completed, ${r.failedCount} failed, ${r.interruptedCount} interrupted`);
   }
+  // Load per-project custom stages from dagclaw.config.ts/.json
+  for (const project of projects) {
+    taskStore.loadProjectStages(project.path).catch(err => {
+      console.error(`[startup] Bad config in ${project.name}: ${err instanceof Error ? err.message : err}`);
+    });
+  }
 }
 
 app.use(createTasksRouter(taskStore));
-app.use(createStagesRouter(customStages));
+app.use(createStagesRouter(taskStore));
 app.use(createProjectsRouter(projectStore, taskStore));
 
 const runsWorkDir = process.env.CLAW_ALLOWED_DIR || process.env.HOME || '/tmp';

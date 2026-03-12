@@ -75,6 +75,10 @@ function createMockTaskStore() {
       return true;
     },
 
+    getStageRegistry(_projectPath: string): Record<string, any> | undefined {
+      return undefined; // No custom stages in tests — falls back to BUILTIN_STAGES
+    },
+
     executeTask(id: string): { error?: string; status?: number } {
       const task = tasks.get(id);
       if (!task) return { error: 'Task not found', status: 404 };
@@ -183,7 +187,7 @@ before(async () => {
   app.use(express.json());
   app.use(createRunsRouter(tempWorkDir));
   app.use(createTasksRouter(mockStore as any));
-  app.use(createStagesRouter({}));
+  app.use(createStagesRouter(mockStore as any));
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
@@ -461,24 +465,6 @@ describe('Stage routes', () => {
     assert.ok(names.includes('Verify'), 'should include Verify stage');
   });
 
-  it('POST /api/stages with invalid body → 400', async () => {
-    const res = await fetch(`${baseUrl}/api/stages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    assert.equal(res.status, 400);
-    const body = await res.json();
-    assert.ok(body.errors);
-  });
-
-  it('DELETE /api/stages/Plan → 409 (cannot delete built-in)', async () => {
-    const res = await fetch(`${baseUrl}/api/stages/Plan`, { method: 'DELETE' });
-    assert.equal(res.status, 409);
-    const body = await res.json();
-    assert.ok(body.error);
-    assert.match(body.error, /built-in/i);
-  });
 });
 
 // ── Health route ────────────────────────────────────────────────────────────

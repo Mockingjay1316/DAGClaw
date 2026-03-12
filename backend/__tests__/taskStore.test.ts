@@ -130,11 +130,9 @@ describe('TaskStore', () => {
     assert.equal(store.cancelTask('does-not-exist'), false);
   });
 
-  it('constructor accepts custom stages and passes them to orchestrator', () => {
-    const customStages = { 'Lint': {} as any };
-    const store = new TaskStore(customStages);
-    assert.ok(store);
-    assert.equal((store as any).customStagesRef, customStages);
+  it('getStageRegistry returns undefined when no custom stages loaded', () => {
+    const store = new TaskStore();
+    assert.equal(store.getStageRegistry('/nonexistent'), undefined);
   });
 
   it('approveTask on task without pending approval returns false', () => {
