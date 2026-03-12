@@ -199,27 +199,27 @@ export class TaskOrchestrator {
       taskNumber: this.opts.taskNumber,
     });
     this.currentRunId = runId;
-    if (!this.isChild) acquireLock(this.opts.workDir, runId);
-    this.logger.cleanTmp();
-
-    const executeIdx = this.opts.pipeline.indexOf('Execute');
-    const postStages = executeIdx >= 0
-      ? this.opts.pipeline.slice(executeIdx + 1)
-      : [];
-
-    const state: PipelineState = {
-      prompt: this.opts.prompt, workDir: this.opts.workDir,
-      plan: null, subtaskSnapshots: new Map(), skippedIndices: new Set(),
-      memoryContext: this.opts.noMemory ? '' : this.memory.buildContextBlock(),
-      verification: null,
-      dagPalette: this.opts.dagStages,
-      postStages,
-      stageDescriptions: formatStageDescriptions(this.opts.dagStages, this.stageRegistry),
-    };
-
-    this.status(`[Run ${runId}] Pipeline: ${this.opts.pipeline.join(' → ')}`);
 
     try {
+      if (!this.isChild) acquireLock(this.opts.workDir, runId);
+      this.logger.cleanTmp();
+
+      const executeIdx = this.opts.pipeline.indexOf('Execute');
+      const postStages = executeIdx >= 0
+        ? this.opts.pipeline.slice(executeIdx + 1)
+        : [];
+
+      const state: PipelineState = {
+        prompt: this.opts.prompt, workDir: this.opts.workDir,
+        plan: null, subtaskSnapshots: new Map(), skippedIndices: new Set(),
+        memoryContext: this.opts.noMemory ? '' : this.memory.buildContextBlock(),
+        verification: null,
+        dagPalette: this.opts.dagStages,
+        postStages,
+        stageDescriptions: formatStageDescriptions(this.opts.dagStages, this.stageRegistry),
+      };
+
+      this.status(`[Run ${runId}] Pipeline: ${this.opts.pipeline.join(' → ')}`);
       for (const stageName of this.opts.pipeline) {
         if (this.isShuttingDown) break;
         const stage = getStageDefinition(stageName, this.stageRegistry);

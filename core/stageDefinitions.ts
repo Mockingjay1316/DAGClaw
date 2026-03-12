@@ -241,7 +241,7 @@ export const BUILTIN_STAGES: Record<string, StageDefinition> = {
 
     resultHandler: (state, parsedOutput) => {
       const plan = parsedOutput as Plan | null;
-      if (!plan) return '[Plan] Failed to parse plan output.';
+      if (!plan) throw new Error('[Plan] Failed to parse plan output — Claude did not produce valid plan JSON.');
 
       const cycle = detectCircularDependencies(
         plan.subtasks.map(s => ({ index: s.index, dependencies: s.dependencies }))

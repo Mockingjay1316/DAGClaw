@@ -143,10 +143,12 @@ describe('stageDefinitions', () => {
       assert.ok(msg.includes('1 subtask'));
     });
 
-    it('returns error message when parsedOutput is null', () => {
+    it('throws when parsedOutput is null', () => {
       const state = makePipelineState();
-      const msg = BUILTIN_STAGES.Plan.resultHandler(state, null);
-      assert.ok(msg.includes('Failed'));
+      assert.throws(
+        () => BUILTIN_STAGES.Plan.resultHandler(state, null),
+        /Failed to parse plan output/,
+      );
     });
   });
 
