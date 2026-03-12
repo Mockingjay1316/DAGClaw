@@ -193,12 +193,23 @@ Pure functions + one async executor. No class.
 - Passes the prompt via stdin
 - Collects stdout, parses the last `result` JSON line for usage stats and session ID
 - Returns `{rawOutput, sessionId, usage}`
+- On non-zero exit or timeout, throws `ClaudeRunError` (preserves partial output + exit code)
+
+**`buildCliArgs(options)`** — constructs the CLI arg array from `RunClaudeOptions`. Exported for testing.
 
 **`buildStagePrompt(template, context)`** — delegates to `interpolateTemplate()`. Replaces `{{key}}` placeholders.
 
 **`parseStageOutput(schema, raw)`** / **`parseStageOutputFile(schema, path)`** — validates JSON against a Zod schema. Returns `null` on failure (with stderr logging). Called by the orchestrator's `runOne()` using the stage's declared `outputSchema`.
 
 **`estimateCost()`** / **`parseUsageFromCliOutput()`** — token counting and cost estimation using Sonnet 4 pricing.
+
+**`extractTextFromStreamJson(rawOutput)`** — parses NDJSON stream for clean text: prefers `result.result` string, falls back to concatenated `assistant` message text blocks. Strips markdown fences internally via `stripMarkdownFence()`. Used by `memoryDistiller.ts`.
+
+**`extractFailureFromRawOutput(raw)`** — fallback for when Claude produces output but no valid structured JSON. Detects patterns (permission denied, timeout, generic errors) and returns `{success, summary, oneliner, retryWorthy}`. Used by orchestrator's `runOne()` to synthesize structured failure data.
+
+**`ClaudeRunError`** — error subclass with `partialOutput` and `exitCode` fields. Thrown by `runClaudeCli` on non-zero exit or timeout. The orchestrator's retry logic treats all `ClaudeRunError` as retryable.
+
+**Note:** `RunClaudeOptions.backend` is typed as `RunnerBackend` (`cli` | `sdk`) but `runClaudeCli` always spawns the CLI — SDK backend is a future placeholder.
 
 ### `core/stageDefinitions.ts` — Stage Configs
 

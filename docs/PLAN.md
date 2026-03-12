@@ -164,6 +164,7 @@ interface RunClaudeOptions {
   timeoutMs?: number;
   backend: RunnerBackend;
   dangerouslySkipPermissions?: boolean;
+  model?: string;
 }
 
 // Result of a single Claude invocation
@@ -185,12 +186,16 @@ interface RunClaudeResult {
 | `parseStageOutput(schema, rawJson)` | Validate JSON string against a Zod schema |
 | `parseStageOutputFile(schema, filePath)` | Read file + validate against a Zod schema |
 | `runClaudeCli(options)` | Spawn `claude -p`, collect output, parse usage + sessionId |
+| `buildCliArgs(options)` | Construct CLI arg array from `RunClaudeOptions` (exported for testing) |
+| `extractTextFromStreamJson(rawOutput)` | Parse NDJSON stream for clean text (result string or assistant messages), strip markdown fences |
+| `extractFailureFromRawOutput(raw)` | Detect failure patterns from raw output when JSON is missing/invalid, return `{success, summary, oneliner, retryWorthy}` |
+| `ClaudeRunError` | Error class with `partialOutput` and `exitCode`, thrown on non-zero exit or timeout |
 
 **Structured output via files (not text parsing):**
-Agents write structured JSON to `.dagclaw/tmp/` files. The orchestrator's `runOne()` validates output via each stage's declared `outputSchema` using `parseStageOutputFile()`, then passes the parsed result to `resultHandler`:
-- Plan → `.dagclaw/tmp/plan.json` (PlanSchema)
-- Execute subtask N → `.dagclaw/tmp/subtask-N-summary.json` (ExecutorOutputSchema)
-- Verify → `.dagclaw/tmp/verification.json` (VerificationResultSchema)
+Agents write structured JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/`). The orchestrator's `runOne()` validates output via each stage's declared `outputSchema` using `parseStageOutputFile()`, then passes the parsed result to `resultHandler`:
+- Plan → `.dagclaw/runs/<runId>/tmp/plan.json` (PlanSchema)
+- Execute subtask N → `.dagclaw/runs/<runId>/tmp/subtask-N-summary.json` (ExecutorOutputSchema)
+- Verify → `.dagclaw/runs/<runId>/tmp/verification.json` (VerificationResultSchema)
 
 **Backend selection logic (v0.1.0):**
 - CLI backend: spawns `claude -p --output-format stream-json` as subprocess. No API key needed — uses Claude Code's own auth.

@@ -486,9 +486,10 @@ every stage prompt, and writes new knowledge after successful runs. Two tiers: *
            │ 1. Build prompt  │──→ buildDistillationPrompt(state)
            │ 2. Run Claude    │──→ runClaudeCli({model: distillModel ?? 'sonnet'})
            │ 3. Extract text  │──→ extractTextFromStreamJson(rawOutput)
-           │ 4. Strip fences  │──→ stripMarkdownFence(text)
-           │ 5. Store 3 ways  │──→ see below
-           │ 6. Update index  │──→ memoryManager.updateIndex()
+           │    (strips fences │      (stripMarkdownFence called internally)
+           │     internally)   │
+           │ 4. Store 3 ways  │──→ see below
+           │ 5. Update index  │──→ memoryManager.updateIndex()
            └──────────────────┘
                     │
         ┌───────────┼────────────────────┐
@@ -514,7 +515,7 @@ TaskOrchestrator.run()
 │
 ├─ 2. memory.buildContextBlock()
 │     │
-│     ├─ readAll()                               (memoryManager.ts:21)
+│     ├─ readAll()                               (memoryManager.ts)
 │     │   ├─ listFiles()                         → readdirSync, filter *.md, sort
 │     │   ├─ sortFilesIndexFirst(files)          → ['index.md', ...rest]
 │     │   └─ FOR each file:
@@ -568,9 +569,9 @@ TaskOrchestrator.run() — post-completion
 │   └─ IF false: skip distillation entirely
 │
 └─ distillMemory(runId, state, logger, memoryManager, opts)
-      │                                           (memoryDistiller.ts:64)
+      │                                           (memoryDistiller.ts)
       │
-      ├─ 1. buildDistillationPrompt(state)        (memoryDistiller.ts:27)
+      ├─ 1. buildDistillationPrompt(state)        (memoryDistiller.ts)
       │     │
       │     │  Assembles a summary of what happened:
       │     │  ┌────────────────────────────────────────────┐
@@ -620,7 +621,7 @@ TaskOrchestrator.run() — post-completion
       │     │
       │     → returns RunClaudeResult { rawOutput (NDJSON stream) }
       │
-      ├─ 3. NDJSON Extraction Pipeline            (claudeRunner.ts:228)
+      ├─ 3. NDJSON Extraction Pipeline            (claudeRunner.ts)
       │     │
       │     │  extractTextFromStreamJson(result.rawOutput)
       │     │  │
