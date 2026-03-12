@@ -253,6 +253,11 @@ runOne(runId, stage, state, subtask?)
 │       parsedOutput = parseStageOutputFile(stage.outputSchema, outputFile)
 │       → reads file, validates JSON via Zod schema
 │       → returns parsed object or null on failure
+│       IF parsedOutput is null AND rawOutput exists:
+│         fallback = extractFailureFromRawOutput(rawOutput)
+│         → detects error patterns (permission denied, timeout, etc.)
+│         → writes synthetic failure JSON to outputFile
+│         → re-parses via schema; parsedOutput stays null if schema doesn't match
 │     ELSE:
 │       parsedOutput = null
 │
@@ -358,12 +363,15 @@ retryLoop(runId, verifyStage, state)
 │    │
 │    ├─ logStageFailure() — prints subtask/integration details
 │    │
-│    ├─ IF no retryStage OR no failedIndices OR attempt >= max:
+│    ├─ Also include cascade-skipped subtasks in retry list
+│    │   (cleared from skippedIndices so they can re-execute)
+│    │
+│    ├─ IF no retryStage OR no retryable indices OR attempt >= max:
 │    │   → return false
 │    │
 │    ├─ Resolve retryStage = getStageDefinition("Execute")
 │    │   retrySubtasks = subtaskExtractor(state)
-│    │     .filter(s => failedIndices.includes(s.index))
+│    │     .filter(s => allRetryIndices.includes(s.index))
 │    │
 │    ├─ FOR each retrySubtask:
 │    │   runOne(runId, executeStage, state, subtask)

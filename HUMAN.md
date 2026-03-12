@@ -172,7 +172,8 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 
 **`retryLoop(stage, state)`** — verification retry:
 - Checks `resultInterpreter` for pass/fail
-- If failed: looks up `retryStage` from stage config, re-runs failed subtasks, re-verifies
+- If failed: looks up `retryStage` from stage config, re-runs failed subtasks + cascade-skipped subtasks, re-verifies
+- Cascade-skipped subtasks are cleared from `skippedIndices` before retry so they can be re-executed
 - Repeats up to `maxRetries` times
 - All retry results are numbered and preserved on disk
 
@@ -180,9 +181,14 @@ Every Claude invocation goes through `runOne`. There are no other paths.
 - `aggregateUsage()` — sums token counts
 - `formatTokenCount(n)` — formats token counts ("18.2k" for large, raw number for small)
 - `formatDuration(ms)` — formats milliseconds ("3m 24s" or "45s")
-- `isGitRepo()`, `getFilesModifiedByGit()` — git helpers
+- `isGitRepo()` — checks for `.git` directory
 - `shouldRecurse(index, plan)` — checks `needsRecursiveDecomposition` flag
 - `buildChildOptions(parentOpts, subtask, depth)` — creates child `CliOptions`
+- `resolveModel(stageModel, isParallel, dagModel, globalModel)` — model precedence: stage > dagModel (parallel only) > global > undefined
+
+Dead exports (kept for tests, not used by orchestrator):
+- `isRetryWorthy()` — superseded by private `isRetryableError()` method which checks `SubtaskError.retryWorthy`
+- `getFilesModifiedByGit()` — never called internally
 
 ### `core/claudeRunner.ts` — Claude CLI Backend
 
