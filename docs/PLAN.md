@@ -321,7 +321,7 @@ const TestStage: StageDefinition = {
 // Use in pipeline: --pipeline "Plan,Execute,Test,Verify"
 ```
 
-**Registration (v0.1.0):** Custom stages are registered programmatically by adding to `BUILTIN_STAGES`. In v0.2+, users will be able to define stages in a `dagclaw.config.json` file in their project root, which the CLI loads on startup.
+**Registration:** Custom stages are loaded from `dagclaw.config.ts` (priority, via dynamic import) or `dagclaw.config.json` (Zod-validated fallback) by `configLoader.ts`. The CLI calls `loadAndMergeStages(projectDir)` on startup, which merges custom stages with `BUILTIN_STAGES`. Reserved names (Plan, Execute, Verify) require `overrideBuiltin: true` to replace. JSON-sourced stages get default `contextBuilder` (all string fields from PipelineState) and `resultHandler` (reads `.summary` or `.message` from output).
 
 **Key constraints for custom stages:**
 - `contextBuilder` must return a `Record<string, string>` that matches the `{{placeholders}}` in `promptTemplate`

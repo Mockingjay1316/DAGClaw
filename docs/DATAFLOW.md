@@ -59,6 +59,26 @@
 
 ## Detailed `run()` Sequence — Data Packets at Each Step
 
+**Pre-run (before orchestrator construction):**
+```
+cli.ts main() / taskStore.ts startTask():
+│
+├─ loadAndMergeStages(projectDir)            (configLoader.ts)
+│     ├─ loadCustomStages(projectDir)
+│     │   ├─ IF dagclaw.config.ts exists: dynamic import, validate each stage
+│     │   └─ ELIF dagclaw.config.json exists: JSON.parse + DagClawConfigSchema (Zod)
+│     │       → JSON stages get default contextBuilder (all string PipelineState fields)
+│     │       → JSON stages get default resultHandler (reads .summary/.message)
+│     └─ mergeStages(BUILTIN_STAGES, custom)
+│         → reserved names (Plan, Execute, Verify) require overrideBuiltin: true
+│         → returns merged stage registry
+│
+├─ Validate pipeline stages against registry
+│     → throws if any pipeline stage not found in registry
+│
+└─ new TaskOrchestrator(opts, callbacks, 0, logger, stageRegistry)
+```
+
 ```
 TaskOrchestrator.run()
 │
