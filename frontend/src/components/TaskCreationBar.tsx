@@ -23,18 +23,13 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-grow textarea to fit content, capped at container available height
+  // Auto-grow textarea to fit content, capped at a reasonable max height
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
-    const container = containerRef.current;
-    if (container) {
-      const containerHeight = container.clientHeight;
-      textarea.style.height = Math.min(textarea.scrollHeight, containerHeight) + 'px';
-    } else {
-      textarea.style.height = textarea.scrollHeight + 'px';
-    }
+    const maxHeight = 300; // cap at 300px to keep the form compact
+    textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
   }, [prompt]);
 
   async function submit(execute: boolean) {
@@ -77,19 +72,19 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
 
   return (
     <div
-      className={`flex flex-col h-full ${className ?? ''}`}
+      className={`flex flex-col ${className ?? ''}`}
       style={style}
     >
-      <div className="p-3 flex flex-col h-full gap-2">
-        {/* Textarea container — grows to fill available space */}
-        <div ref={containerRef} className="flex-1 min-h-0">
+      <div className="p-3 flex flex-col gap-2">
+        {/* Textarea container — auto-sizes to content */}
+        <div ref={containerRef}>
           <textarea
             ref={textareaRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Describe the task..."
             rows={3}
-            className="h-full w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
+            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
