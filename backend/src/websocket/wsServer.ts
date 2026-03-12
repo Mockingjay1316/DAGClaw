@@ -5,12 +5,8 @@ import { MessageBuffer } from './messageBuffer.ts';
 import { SubscriptionManager } from './subscriptionManager.ts';
 import { timingSafeCompare } from '../middleware/auth.ts';
 
-/** Forward-declared TaskStore reference to avoid circular deps. */
-export interface TaskStoreRef {
-  approveTask(id: string): void;
-  rejectTask(id: string, feedback?: string): void;
-  cancelTask(id: string): void;
-  executeTask(id: string): { error?: string; status?: number };
+/** Read-only data source for serving snapshots on project subscription. */
+export interface TaskDataSource {
   getTasksByProject(projectId: string): unknown[];
   toSummary(task: unknown): Record<string, unknown>;
 }
@@ -25,7 +21,7 @@ export class WsServer {
   private projectSubscriptions = new SubscriptionManager();
   private buffers = new Map<string, MessageBuffer>();
   private clients = new Map<string, WebSocket>();
-  private taskStore: TaskStoreRef | null = null;
+  private dataSource: TaskDataSource | null = null;
 
   constructor(server: http.Server) {
     this.wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
@@ -86,9 +82,9 @@ export class WsServer {
     });
   }
 
-  /** Sets the task store reference for handling approve/reject/cancel. */
-  setTaskStore(store: TaskStoreRef): void {
-    this.taskStore = store;
+  /** Sets the read-only data source for serving project snapshots. */
+  setDataSource(source: TaskDataSource): void {
+    this.dataSource = source;
   }
 
   /** Broadcast a message to all clients subscribed to a specific node. */
@@ -191,9 +187,9 @@ export class WsServer {
         const projectId = msg.projectId as string;
         this.projectSubscriptions.subscribe(clientId, [projectId]);
         // Send current project tasks snapshot
-        if (this.taskStore) {
-          const tasks = this.taskStore.getTasksByProject(projectId);
-          const summaries = tasks.map(t => this.taskStore!.toSummary(t));
+        if (this.dataSource) {
+          const tasks = this.dataSource.getTasksByProject(projectId);
+          const summaries = tasks.map(t => this.dataSource!.toSummary(t));
           ws.send(JSON.stringify({
             type: 'project_tasks_snapshot',
             projectId,
@@ -208,38 +204,6 @@ export class WsServer {
           return;
         }
         this.projectSubscriptions.unsubscribe(clientId, [msg.projectId as string]);
-        break;
-      }
-      case 'approve_plan': {
-        if (typeof msg.taskId !== 'string') {
-          console.warn('[WsServer] Invalid message: taskId must be a string, got:', typeof msg.taskId);
-          return;
-        }
-        this.taskStore?.approveTask(msg.taskId as string);
-        break;
-      }
-      case 'reject_plan': {
-        if (typeof msg.taskId !== 'string') {
-          console.warn('[WsServer] Invalid message: taskId must be a string, got:', typeof msg.taskId);
-          return;
-        }
-        this.taskStore?.rejectTask(msg.taskId as string, msg.feedback as string | undefined);
-        break;
-      }
-      case 'cancel': {
-        if (typeof msg.taskId !== 'string') {
-          console.warn('[WsServer] Invalid message: taskId must be a string, got:', typeof msg.taskId);
-          return;
-        }
-        this.taskStore?.cancelTask(msg.taskId as string);
-        break;
-      }
-      case 'execute_task': {
-        if (typeof msg.taskId !== 'string') {
-          console.warn('[WsServer] Invalid execute_task: taskId must be a string');
-          return;
-        }
-        this.taskStore?.executeTask(msg.taskId as string);
         break;
       }
       default: {

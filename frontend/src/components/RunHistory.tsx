@@ -1,20 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { RunSummary, RunManifest } from '../types.ts';
+import { formatDuration, formatCost } from '../utils/formatters.ts';
 
 const PAGE_SIZE = 20;
-
-function formatDuration(duration: number | null): string {
-  if (duration == null) return '—';
-  if (duration < 60) return `${Math.round(duration)}s`;
-  const mins = Math.floor(duration / 60);
-  const secs = Math.round(duration % 60);
-  return `${mins}m ${secs}s`;
-}
-
-function formatCost(cost: number): string {
-  if (cost === 0) return '—';
-  return `$${cost.toFixed(4)}`;
-}
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {

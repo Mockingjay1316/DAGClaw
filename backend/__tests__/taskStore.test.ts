@@ -57,7 +57,7 @@ describe('TaskStore', () => {
         message: 'Please approve',
       },
     };
-    (store as any).tasks.set('test-approve', task);
+    store.registerTask(task); // was: (store as any).tasks.set('test-approve', task);
 
     const result = store.approveTask('test-approve');
     assert.equal(result, true);
@@ -84,7 +84,7 @@ describe('TaskStore', () => {
         message: 'Please approve',
       },
     };
-    (store as any).tasks.set('test-reject', task);
+    store.registerTask(task); // was: (store as any).tasks.set('test-reject', task);
 
     const result = store.rejectTask('test-reject', 'not good enough');
     assert.equal(result, true);
@@ -108,7 +108,7 @@ describe('TaskStore', () => {
       createdAt: new Date().toISOString(),
       taskNumber: 1,
     };
-    (store as any).tasks.set('test-cancel', task);
+    store.registerTask(task); // was: (store as any).tasks.set('test-cancel', task);
 
     const result = store.cancelTask('test-cancel');
     assert.equal(result, true);
@@ -149,7 +149,7 @@ describe('TaskStore', () => {
       createdAt: new Date().toISOString(),
       taskNumber: 1,
     };
-    (store as any).tasks.set('no-approval', task);
+    store.registerTask(task); // was: (store as any).tasks.set('no-approval', task);
     assert.equal(store.approveTask('no-approval'), false);
   });
 

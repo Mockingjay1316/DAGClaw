@@ -49,7 +49,7 @@ const wsServer = new WsServer(server);
 // Wire up components
 taskStore.setWsServer(wsServer);
 taskStore.setScheduler(taskScheduler);
-wsServer.setTaskStore(taskStore);
+wsServer.setDataSource(taskStore);
 
 // Scheduler starts tasks via taskStore
 taskScheduler.onStart(async (taskId) => {

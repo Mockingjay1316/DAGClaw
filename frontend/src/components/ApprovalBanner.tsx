@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useWebSocket } from '../hooks/useWebSocket.ts';
+import { approveTask, rejectTask } from '../api/tasks.ts';
 
 interface ApprovalBannerProps {
   taskId: string;
@@ -7,7 +7,6 @@ interface ApprovalBannerProps {
 }
 
 export function ApprovalBanner({ taskId, message }: ApprovalBannerProps) {
-  const { approvePlan, rejectPlan } = useWebSocket();
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -15,10 +14,9 @@ export function ApprovalBanner({ taskId, message }: ApprovalBannerProps) {
   async function handleApprove() {
     setSubmitting(true);
     try {
-      approvePlan(taskId);
-      await fetch(`/api/tasks/${taskId}/approve`, { method: 'POST' });
+      await approveTask(taskId);
     } catch {
-      // WS message already sent; HTTP is best-effort
+      // Best-effort
     } finally {
       setSubmitting(false);
     }
@@ -31,14 +29,9 @@ export function ApprovalBanner({ taskId, message }: ApprovalBannerProps) {
     }
     setSubmitting(true);
     try {
-      rejectPlan(taskId, feedback || undefined);
-      await fetch(`/api/tasks/${taskId}/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback: feedback || undefined }),
-      });
+      await rejectTask(taskId, feedback || undefined);
     } catch {
-      // WS message already sent; HTTP is best-effort
+      // Best-effort
     } finally {
       setSubmitting(false);
     }

@@ -193,9 +193,5 @@ export type WsMessage =
 export type WsClientMessage =
   | { type: 'subscribe'; nodeIds: string[] }
   | { type: 'unsubscribe'; nodeIds: string[] }
-  | { type: 'approve_plan'; taskId: string }
-  | { type: 'reject_plan'; taskId: string; feedback?: string }
-  | { type: 'cancel'; taskId: string }
   | { type: 'subscribe_project'; projectId: string }
-  | { type: 'unsubscribe_project'; projectId: string }
-  | { type: 'execute_task'; taskId: string };
+  | { type: 'unsubscribe_project'; projectId: string };

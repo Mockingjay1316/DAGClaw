@@ -1,102 +1,49 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { TaskOrchestrator, OrchestratorCallbacks } from '../../core/taskOrchestrator.ts';
-import type { CliOptions, DAGEvent, Plan, StageDefinition, PermissionMode } from '../../core/types.ts';
-import { RunLogger } from '../../core/runLogger.ts';
+import type { StageDefinition } from '../../core/types.ts';
 import { mergeStages, loadCustomStages } from '../../core/configLoader.ts';
 import { BUILTIN_STAGES } from '../../core/stageDefinitions.ts';
 import type { WsServer } from './websocket/wsServer.ts';
 import type { TaskScheduler } from './taskScheduler.ts';
+import { TaskStateMachine, toSummary } from './taskStateMachine.ts';
+import type { ManagedTask, ManagedTaskStatus, ApiPermissionMode } from './taskStateMachine.ts';
+import { persistTodoTask, removeTodoPersistence } from './taskPersistence.ts';
+import { BroadcastManager } from './broadcastManager.ts';
+import { OrchestratorManager, mapPermissionMode } from './orchestratorManager.ts';
 
-export type ManagedTaskStatus = 'todo' | 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'cancelled';
+export { ManagedTask, ManagedTaskStatus, ApiPermissionMode, mapPermissionMode };
 
-export interface ManagedTask {
-  id: string;
-  prompt: string;
-  workDir: string;
-  projectId: string;
-  runId: string | null;
-  status: ManagedTaskStatus;
-  pendingApproval?: { resolve: (approved: boolean) => void; message: string };
-  orchestrator: TaskOrchestrator | null;
-  error?: string;
-  pipeline?: string[];
-  permissionMode?: ApiPermissionMode;
-  createdAt: string;
-  taskNumber: number;
-  startedAt?: string;
-  finishedAt?: string;
-}
-
-/** Frontend permission mode values accepted by the API. */
-export type ApiPermissionMode = 'interactive' | 'auto-approve' | 'yolo';
-
-/** Map API permissionMode (or legacy autoApprove) to CliOptions-compatible values. */
-export function mapPermissionMode(
-  mode?: ApiPermissionMode,
-  legacyAutoApprove?: boolean,
-): { autoApprove: boolean; dangerouslySkipPermissions: boolean; permissionMode: PermissionMode } {
-  if (mode === 'interactive') {
-    return { autoApprove: false, dangerouslySkipPermissions: false, permissionMode: 'interactive' };
-  }
-  if (mode === 'auto-approve') {
-    return { autoApprove: true, dangerouslySkipPermissions: false, permissionMode: 'auto' };
-  }
-  if (mode === 'yolo') {
-    return { autoApprove: true, dangerouslySkipPermissions: true, permissionMode: 'auto' };
-  }
-  // Fallback: no permissionMode provided — use legacy autoApprove boolean
-  const auto = legacyAutoApprove ?? false;
-  return { autoApprove: auto, dangerouslySkipPermissions: false, permissionMode: 'auto' };
-}
-
-/** Map DAGEvent.type to WebSocket message type. */
-function mapDAGEventType(event: DAGEvent): string {
-  switch (event.type) {
-    case 'dag-start': return 'tree_snapshot';
-    case 'subtask-started': return 'subtask_start';
-    case 'subtask-completed': return 'subtask_complete';
-    case 'subtask-failed': return 'subtask_complete';
-    case 'subtask-skipped': return 'subtask_complete';
-    case 'dag-complete': return 'stage_complete';
-    default: return 'unknown';
-  }
-}
-
-/** Persistence format for TODO tasks in .dagclaw/tasks.json */
-interface TodoTaskFile {
-  tasks: Array<{
-    id: string;
-    prompt: string;
-    pipeline?: string[];
-    permissionMode?: ApiPermissionMode;
-    createdAt: string;
-    taskNumber: number;
-  }>;
-}
-
+/**
+ * Thin facade that wires together TaskStateMachine, BroadcastManager,
+ * OrchestratorManager, and persistence. Public API is unchanged.
+ */
 export class TaskStore {
-  private tasks = new Map<string, ManagedTask>();
-  private wsServer: WsServer | null = null;
+  private stateMachine = new TaskStateMachine();
+  private broadcaster = new BroadcastManager();
+  private orchestratorManager: OrchestratorManager;
   private scheduler: TaskScheduler | null = null;
-  private nextTaskNumber = 1;
   private projectStages = new Map<string, Record<string, StageDefinition>>();
 
-  constructor() {}
+  constructor() {
+    this.orchestratorManager = new OrchestratorManager(
+      this.stateMachine,
+      this.broadcaster,
+      null,
+      (path) => this.getStageRegistry(path),
+    );
+  }
 
   /** Store reference to WsServer for broadcasting. */
   setWsServer(ws: WsServer): void {
-    this.wsServer = ws;
+    this.broadcaster.setWsServer(ws);
   }
 
   /** Store reference to TaskScheduler. */
   setScheduler(scheduler: TaskScheduler): void {
     this.scheduler = scheduler;
+    this.orchestratorManager.setScheduler(scheduler);
   }
 
-  /** Load custom stages from a project's dagclaw.config.ts/.json and cache them.
-   *  Returns silently if no config file exists. Logs error if config is malformed. */
+  /** Load custom stages from a project's dagclaw.config.ts/.json and cache them. */
   async loadProjectStages(projectPath: string): Promise<void> {
     const custom = await loadCustomStages(projectPath);
     if (Object.keys(custom).length > 0) {
@@ -133,17 +80,17 @@ export class TaskStore {
       pipeline: opts.pipeline,
       permissionMode: opts.permissionMode,
       createdAt: now,
-      taskNumber: this.nextTaskNumber++,
+      taskNumber: this.stateMachine.allocateTaskNumber(),
     };
 
-    this.tasks.set(taskId, task);
-    this.persistTodoTask(task);
+    this.stateMachine.set(taskId, task);
+    persistTodoTask(task);
 
     // Broadcast task creation
-    this.wsServer?.broadcastAll({
+    this.broadcaster.broadcastAll({
       type: 'task_created',
       projectId: opts.projectId,
-      task: this.toSummary(task),
+      task: toSummary(task),
     });
 
     return taskId;
@@ -151,20 +98,19 @@ export class TaskStore {
 
   /** Move a TODO task to queued and enqueue in scheduler. */
   executeTask(taskId: string): { error?: string; status?: number } {
-    const task = this.tasks.get(taskId);
+    const task = this.stateMachine.getTask(taskId);
     if (!task) return { error: 'Task not found', status: 404 };
     if (task.status !== 'todo') return { error: 'Task is not in TODO status', status: 400 };
 
     const oldStatus = task.status;
     task.status = 'queued';
-    this.removeTodoPersistence(task);
+    removeTodoPersistence(task);
 
-    this.broadcastStatusChange(task, oldStatus);
+    this.broadcaster.broadcastStatusChange(task, oldStatus);
 
     if (this.scheduler) {
       this.scheduler.enqueue(taskId);
     } else {
-      // No scheduler — start immediately
       this.startTask(taskId).catch(err => {
         console.error(`[taskStore] Failed to start task ${taskId}:`, err);
       });
@@ -173,92 +119,12 @@ export class TaskStore {
     return {};
   }
 
-  /** Start a queued task — launches the orchestrator. Called by scheduler or directly. */
+  /** Start a queued task — delegates to OrchestratorManager. */
   async startTask(taskId: string): Promise<void> {
-    const task = this.tasks.get(taskId);
-    if (!task) throw new Error(`Task not found: ${taskId}`);
-
-    const oldStatus = task.status;
-    task.status = 'running';
-    if (!task.startedAt) {
-      task.startedAt = new Date().toISOString();
-    }
-    this.broadcastStatusChange(task, oldStatus);
-
-    const mapped = mapPermissionMode(task.permissionMode);
-
-    const cliOpts: CliOptions = {
-      prompt: task.prompt,
-      workDir: task.workDir,
-      pipeline: task.pipeline ?? ['Plan', 'Execute', 'Verify'],
-      backend: { type: 'cli' },
-      permissionMode: mapped.permissionMode,
-      autoApprove: mapped.autoApprove,
-      maxRetries: 1,
-      maxConcurrency: 4,
-      maxDepth: 3,
-      timeoutSeconds: 300,
-      noSummary: true,
-      noMemory: false,
-      dagStages: ['Execute'],
-      taskNumber: task.taskNumber,
-    };
-
-    const callbacks = this.buildCallbacks(task);
-
-    const stageRegistry = this.getStageRegistry(task.workDir);
-
-    const orchestrator = new TaskOrchestrator(
-      cliOpts,
-      callbacks,
-      0,
-      undefined,
-      stageRegistry,
-    );
-    task.orchestrator = orchestrator;
-
-    // Run in background
-    orchestrator.run().then(
-      (result) => {
-        task.runId = result.runId;
-        const old = task.status;
-        if (result.success) {
-          task.status = 'completed';
-          task.finishedAt = new Date().toISOString();
-          this.broadcastStatusChange(task, old);
-          this.wsServer?.broadcast(taskId, { type: 'task_complete', taskId });
-        } else {
-          // Plan was rejected or run failed without throwing.
-          // rejectTask() may have already set a terminal status — respect it.
-          if (old !== 'failed' && old !== 'cancelled') {
-            task.status = 'failed';
-          }
-          task.finishedAt = task.finishedAt ?? new Date().toISOString();
-          if (task.status !== old) {
-            this.broadcastStatusChange(task, old);
-          }
-          this.wsServer?.broadcast(taskId, {
-            type: 'task_error',
-            taskId,
-            error: 'Run did not complete successfully',
-          });
-        }
-        this.scheduler?.onTaskFinished(taskId);
-      },
-      (err: unknown) => {
-        const old = task.status;
-        task.status = 'failed';
-        task.finishedAt = new Date().toISOString();
-        task.error = err instanceof Error ? err.message : String(err);
-        console.error(`[taskStore] Task ${taskId} failed:`, task.error);
-        this.broadcastStatusChange(task, old);
-        this.wsServer?.broadcast(taskId, { type: 'task_error', taskId, error: task.error });
-        this.scheduler?.onTaskFinished(taskId);
-      },
-    );
+    return this.orchestratorManager.startTask(taskId);
   }
 
-  /** Backward-compatible: create + immediately queue a task. */
+  /** Create a task and immediately queue it for execution. Skips TODO state entirely. */
   async createTask(opts: {
     prompt: string;
     workDir: string;
@@ -267,78 +133,102 @@ export class TaskStore {
     autoApprove?: boolean;
     permissionMode?: ApiPermissionMode;
   }): Promise<string> {
-    const taskId = this.createTodoTask({
-      projectId: opts.projectId,
+    const taskId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    const task: ManagedTask = {
+      id: taskId,
       prompt: opts.prompt,
       workDir: opts.workDir,
+      projectId: opts.projectId,
+      runId: null,
+      status: 'queued',
+      orchestrator: null,
       pipeline: opts.pipeline,
       permissionMode: opts.permissionMode ?? (opts.autoApprove ? 'auto-approve' : undefined),
+      createdAt: now,
+      taskNumber: this.stateMachine.allocateTaskNumber(),
+    };
+
+    this.stateMachine.set(taskId, task);
+
+    // Broadcast as created with queued status — single message, no transient TODO
+    this.broadcaster.broadcastAll({
+      type: 'task_created',
+      projectId: opts.projectId,
+      task: toSummary(task),
     });
-    this.executeTask(taskId);
+
+    if (this.scheduler) {
+      this.scheduler.enqueue(taskId);
+    } else {
+      this.startTask(taskId).catch(err => {
+        console.error(`[taskStore] Failed to start task ${taskId}:`, err);
+      });
+    }
+
     return taskId;
   }
 
   /** Register a pre-built ManagedTask (used by state restoration). */
   registerTask(task: ManagedTask): void {
     if (task.taskNumber === 0) {
-      task.taskNumber = this.nextTaskNumber++;
+      task.taskNumber = this.stateMachine.allocateTaskNumber();
     }
-    this.tasks.set(task.id, task);
-    if (task.taskNumber >= this.nextTaskNumber) {
-      this.nextTaskNumber = task.taskNumber + 1;
-    }
+    this.stateMachine.set(task.id, task);
+    this.stateMachine.updateNextTaskNumber(task.taskNumber);
   }
 
   /** Get a task by id. */
   getTask(id: string): ManagedTask | undefined {
-    return this.tasks.get(id);
+    return this.stateMachine.getTask(id);
   }
 
   /** List all tasks. */
   listTasks(): ManagedTask[] {
-    return Array.from(this.tasks.values());
+    return this.stateMachine.listTasks();
   }
 
   /** List tasks for a specific project. */
   getTasksByProject(projectId: string): ManagedTask[] {
-    return this.listTasks().filter(t => t.projectId === projectId);
+    return this.stateMachine.getTasksByProject(projectId);
   }
 
   /** List tasks by status. */
   getTasksByStatus(status: ManagedTaskStatus): ManagedTask[] {
-    return this.listTasks().filter(t => t.status === status);
+    return this.stateMachine.getTasksByStatus(status);
   }
 
   /** Approve a pending task. Returns true if approval was pending. */
   approveTask(id: string): boolean {
-    const task = this.tasks.get(id);
+    const task = this.stateMachine.getTask(id);
     if (!task?.pendingApproval) return false;
     task.pendingApproval.resolve(true);
     task.pendingApproval = undefined;
     const old = task.status;
     task.status = 'running';
-    this.broadcastStatusChange(task, old);
-    this.wsServer?.broadcast(id, { type: 'approval_resolved', taskId: id, approved: true });
+    this.broadcaster.broadcastStatusChange(task, old);
+    this.broadcaster.broadcast(id, { type: 'approval_resolved', taskId: id, approved: true });
     return true;
   }
 
   /** Reject a pending task. Returns true if approval was pending. */
   rejectTask(id: string, feedback?: string): boolean {
-    const task = this.tasks.get(id);
+    const task = this.stateMachine.getTask(id);
     if (!task?.pendingApproval) return false;
     task.pendingApproval.resolve(false);
     task.pendingApproval = undefined;
     const old = task.status;
     task.status = 'cancelled';
     task.finishedAt = new Date().toISOString();
-    this.broadcastStatusChange(task, old);
-    this.wsServer?.broadcast(id, { type: 'approval_resolved', taskId: id, approved: false });
+    this.broadcaster.broadcastStatusChange(task, old);
+    this.broadcaster.broadcast(id, { type: 'approval_resolved', taskId: id, approved: false });
     return true;
   }
 
   /** Retry a completed/failed task by creating a new task with the same config. */
   async retryTask(id: string): Promise<{ newId: string } | { error: string; status: number }> {
-    const original = this.tasks.get(id);
+    const original = this.stateMachine.getTask(id);
     if (!original) {
       return { error: 'Task not found', status: 404 };
     }
@@ -357,7 +247,7 @@ export class TaskStore {
 
   /** Cancel a running task. Returns true if task existed. */
   cancelTask(id: string): boolean {
-    const task = this.tasks.get(id);
+    const task = this.stateMachine.getTask(id);
     if (!task) return false;
 
     // If queued, remove from scheduler queue
@@ -369,143 +259,13 @@ export class TaskStore {
     const old = task.status;
     task.status = 'cancelled';
     task.finishedAt = new Date().toISOString();
-    this.broadcastStatusChange(task, old);
+    this.broadcaster.broadcastStatusChange(task, old);
     this.scheduler?.onTaskFinished(id);
     return true;
   }
 
   /** Convert task to a summary object for API responses. */
   toSummary(task: ManagedTask): Record<string, unknown> {
-    return {
-      id: task.id,
-      prompt: task.prompt,
-      workDir: task.workDir,
-      projectId: task.projectId,
-      status: task.status,
-      runId: task.runId,
-      error: task.error,
-      createdAt: task.createdAt,
-      startedAt: task.startedAt,
-      finishedAt: task.finishedAt,
-      taskNumber: task.taskNumber,
-    };
-  }
-
-  private broadcastStatusChange(task: ManagedTask, oldStatus: string): void {
-    this.wsServer?.broadcastAll({
-      type: 'task_status_changed',
-      taskId: task.id,
-      projectId: task.projectId,
-      oldStatus,
-      newStatus: task.status,
-    });
-  }
-
-  private buildCallbacks(task: ManagedTask): OrchestratorCallbacks {
-    const taskId = task.id;
-    return {
-      onStatus: (msg: string) => {
-        this.wsServer?.broadcast(taskId, { type: 'node_status', taskId, message: msg });
-      },
-      onDAGEvent: (event: DAGEvent) => {
-        const { type: _eventType, ...eventData } = event;
-        this.wsServer?.broadcast(taskId, { type: mapDAGEventType(event), taskId, ...eventData });
-        // Broadcast usage update after each subtask completes
-        if (event.type === 'subtask-completed' || event.type === 'subtask-failed') {
-          const runId = task.orchestrator?.currentRunId;
-          if (runId) {
-            try {
-              const logger = new RunLogger(task.workDir);
-              const manifest = logger.readManifest(runId);
-              this.wsServer?.broadcast(taskId, {
-                type: 'usage_update',
-                taskId,
-                usage: manifest.usage,
-              });
-            } catch {
-              // Ignore if manifest not readable yet
-            }
-          }
-        }
-      },
-      onStageStart: (label: string, stageName?: string) => {
-        this.wsServer?.broadcast(taskId, { type: 'stage_start', taskId, label, stageName: stageName ?? label });
-      },
-      onStageEnd: () => {
-        this.wsServer?.broadcast(taskId, { type: 'stage_complete', taskId });
-        const runId = task.orchestrator?.currentRunId;
-        if (runId) {
-          try {
-            const logger = new RunLogger(task.workDir);
-            const manifest = logger.readManifest(runId);
-            this.wsServer?.broadcast(taskId, {
-              type: 'usage_update',
-              taskId,
-              usage: manifest.usage,
-            });
-          } catch {
-            // Ignore if manifest not readable yet
-          }
-        }
-      },
-      onApprovalRequest: (message: string) => {
-        return new Promise<boolean>((resolve) => {
-          task.pendingApproval = { resolve, message };
-          const old = task.status;
-          task.status = 'awaiting_approval';
-          this.broadcastStatusChange(task, old);
-          this.wsServer?.broadcast(taskId, { type: 'approval_required', taskId, message });
-        });
-      },
-      onWarning: (msg: string) => {
-        this.wsServer?.broadcast(taskId, { type: 'node_status', taskId, message: '[warn] ' + msg });
-      },
-      onPlanReady: (plan: Plan) => {
-        this.wsServer?.broadcast(taskId, { type: 'plan_ready', taskId, plan });
-      },
-    };
-  }
-
-  /** Persist a TODO task to .dagclaw/tasks.json in its workDir. */
-  private persistTodoTask(task: ManagedTask): void {
-    try {
-      const filePath = path.join(task.workDir, '.dagclaw', 'tasks.json');
-      const dir = path.dirname(filePath);
-      fs.mkdirSync(dir, { recursive: true });
-
-      let data: TodoTaskFile = { tasks: [] };
-      if (fs.existsSync(filePath)) {
-        try {
-          data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        } catch { /* start fresh */ }
-      }
-
-      data.tasks.push({
-        id: task.id,
-        prompt: task.prompt,
-        pipeline: task.pipeline,
-        permissionMode: task.permissionMode,
-        createdAt: task.createdAt,
-        taskNumber: task.taskNumber,
-      });
-
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error(`[taskStore] Failed to persist TODO task:`, err);
-    }
-  }
-
-  /** Remove a task from .dagclaw/tasks.json when it moves out of TODO. */
-  private removeTodoPersistence(task: ManagedTask): void {
-    try {
-      const filePath = path.join(task.workDir, '.dagclaw', 'tasks.json');
-      if (!fs.existsSync(filePath)) return;
-
-      const data: TodoTaskFile = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      data.tasks = data.tasks.filter(t => t.id !== task.id);
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error(`[taskStore] Failed to remove TODO persistence:`, err);
-    }
+    return toSummary(task);
   }
 }
