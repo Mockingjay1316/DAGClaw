@@ -283,7 +283,7 @@ Writes everything to `.dagclaw/runs/<runId>/`:
 - `logStagePrompt()` — saves full prompt + system prompt as markdown
 - `writeVerification()` — numbered per attempt (verification-0.json, verification-1.json)
 - `updateSubtaskUsage()` / `updateStageUsage()` — updates manifest with token counts
-- `recalcTotals()` — sums perStage + perSubtask into totals
+- `recalcTotals()` (private) — sums perStage + perSubtask into totals, called by updateSubtaskUsage/updateStageUsage
 - `listRuns()` — reads all manifests, returns sorted summaries
 - `createChildLogger(parentRunId)` — creates a nested logger for child runs (logs go under `parent/children/childRunId/`)
 - `cleanTmp()` / `tmpPath()` — run-scoped tmp directories (`.dagclaw/runs/<runId>/tmp/`), isolated per orchestrator instance
@@ -311,7 +311,7 @@ Manages `.dagclaw/memory/` directory. Two responsibilities: writing structured m
 - `updateIndex()` — regenerates `index.md` as a 3-column markdown table (Run | Title | Summary) by parsing all memory files
 
 **Reading:**
-- `readAll()` — concatenates all markdown files with `--- filename ---` headers, index.md sorted first
+- `readAll()` — concatenates all markdown files with `### filename` headers, index.md sorted first
 - `buildContextBlock(maxChars?)` — wraps `readAll()` with `--- Project Memory ---` header, optional truncation. Currently dumps ALL files (no selection)
 - `readFile(filename)` — reads a single memory file
 - `listFiles()` — lists all `.md` files in memory directory

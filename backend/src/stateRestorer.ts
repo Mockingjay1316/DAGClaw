@@ -66,6 +66,7 @@ function restoreTodoTasks(project: Project, taskStore: TaskStore): number {
     const raw = fs.readFileSync(tasksFile, 'utf-8');
     const data = JSON.parse(raw) as { tasks: TodoTaskEntry[] };
     let count = 0;
+    let needsWrite = false;
 
     for (const entry of data.tasks) {
       const task: ManagedTask = {
@@ -82,7 +83,20 @@ function restoreTodoTasks(project: Project, taskStore: TaskStore): number {
         taskNumber: entry.taskNumber ?? 0,
       };
       taskStore.registerTask(task);
+      if (!entry.taskNumber && task.taskNumber > 0) {
+        entry.taskNumber = task.taskNumber;
+        needsWrite = true;
+      }
       count++;
+    }
+
+    // Persist assigned taskNumbers back to tasks.json
+    if (needsWrite) {
+      try {
+        fs.writeFileSync(tasksFile, JSON.stringify(data, null, 2) + '\n');
+      } catch {
+        // Non-critical
+      }
     }
 
     return count;
@@ -134,6 +148,8 @@ function restoreRunTasks(
           counts.failed++;
         }
 
+        const needsBackfill = !(typeof manifest.taskNumber === 'number' && manifest.taskNumber > 0);
+
         const task: ManagedTask = {
           id: crypto.randomUUID(),
           prompt: manifest.prompt ?? `Run ${runId}`,
@@ -151,6 +167,16 @@ function restoreRunTasks(
         };
 
         taskStore.registerTask(task);
+
+        // Persist assigned taskNumber back to manifest for stability across restarts
+        if (needsBackfill && task.taskNumber > 0) {
+          try {
+            manifest.taskNumber = task.taskNumber;
+            fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+          } catch {
+            // Non-critical: log files may be read-only
+          }
+        }
       } catch {
         // Skip corrupt manifests
       }
