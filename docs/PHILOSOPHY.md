@@ -55,12 +55,18 @@ The prompt inspector, run history, and context flow visualization make the syste
 
 ## UI as the leverage point
 
-The backend engine is mature — orchestration, scheduling, logging, memory all work. The frontend is where the most user value can be created now:
-- Making context flow visible (what does each subtask see?)
-- Making plans editable (adjust before execution)
-- Making costs transparent (per-stage breakdown)
-- Making run history browsable (learn from past runs)
-- Making the DAG interactive (not just a status display)
+The backend engine is mature — orchestration, scheduling, logging, memory all work. The frontend is where the most user value has been created:
+- **Kanban board** with drag-and-drop-ready columns (TODO, Queued, Need Review, Running, Failed, Done) gives immediate visual status across all tasks
+- **Activity timeline** showing all task events as they happen
+- **Cost/token display** per task, making spend transparent at every level
+- **Run history browser** for learning from past runs and replaying plans
+- **HTTP REST + WS split**: REST handles commands and queries (including historical plan/verification load from run logs), WebSocket is used exclusively for real-time push — clean separation of concerns
+- **Auto-subscription lifecycle management**: the frontend subscribes to exactly the tasks it needs and cleans up automatically
+
+Remaining future work:
+- Plan editing before execution (adjust the DAG before committing)
+- Context flow visualization (what does each subtask see?)
+- Interactive DAG manipulation (reorder, add, remove subtasks visually)
 
 The CLI will always exist for power users and automation. But for understanding what DAGClaw is doing and why, the UI is essential.
 

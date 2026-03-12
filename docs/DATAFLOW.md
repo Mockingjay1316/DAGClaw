@@ -61,7 +61,7 @@
 
 **Pre-run (before orchestrator construction):**
 ```
-cli.ts main() / taskStore.ts startTask():
+cli.ts main() / orchestratorManager.ts startTask():
 │
 ├─ loadAndMergeStages(projectDir)            (configLoader.ts)
 │     ├─ loadCustomStages(projectDir)
@@ -904,4 +904,362 @@ Concurrency with git worktrees:
                 ├── prompts/
                 ├── subtasks/
                 └── children/         ← grandchild runs (if any)
+```
+
+## Frontend ↔ Backend Communication Model
+
+The communication is split between two channels:
+- **HTTP REST** — all commands (create, execute, approve, reject, cancel, retry) and queries (task list, plan, verification, usage)
+- **WebSocket** — server→client push only (real-time status updates, subtask output)
+
+### Architecture Overview
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     React Frontend                              │
+│                                                                  │
+│  ProjectSidebar   KanbanBoard    DetailPanel   TaskCreationBar  │
+│  (project list)   (TaskCards)    (plan/exec/   (prompt input)   │
+│                                   verify)                       │
+│        │               │              │              │           │
+│        └───────┬───────┴──────┬───────┘              │           │
+│                │              │                       │           │
+│          Zustand Store   useWebSocket          HTTP fetch       │
+│         (orchestratorStore)  (singleton)        (api/tasks.ts)  │
+│                │              │                       │           │
+│     wsMessageHandlers    subscribe/              REST calls      │
+│     (auto-sub/unsub)    unsubscribe                             │
+└────────────────┼──────────────┼───────────────────────┼─────────┘
+                 │              │                       │
+          WS push only    WS subscribe          HTTP request
+                 │              │                       │
+┌────────────────┼──────────────┼───────────────────────┼─────────┐
+│                Express Backend                                   │
+│                │              │                       │           │
+│         BroadcastManager  WsServer            REST routes       │
+│         (broadcast/       (connections,       (tasks.ts,        │
+│          broadcastAll)     subscriptions,      projects.ts,     │
+│                │           buffering)          runs.ts)          │
+│                │              │                       │           │
+│         ┌──────┴──────────────┘                      │           │
+│         │                                            │           │
+│    TaskStore (facade)────────────────────────────────┘           │
+│    ├── TaskStateMachine    (registry, queries)                   │
+│    ├── TaskPersistence     (.dagclaw/tasks.json I/O)            │
+│    ├── OrchestratorManager (lifecycle, callbacks)               │
+│    ├── TaskScheduler       (concurrency-limited FIFO)           │
+│    └── BroadcastManager    (WS broadcast delegation)            │
+│                │                                                 │
+│         TaskOrchestrator (core/)                                 │
+│         (pipeline driver, DAG scheduling)                        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## Task Lifecycle — Complete Data Flow
+
+### 1. Task Creation
+
+```
+User types prompt in TaskCreationBar, clicks "Execute" or "TODO"
+
+TaskCreationBar.submit(execute: boolean)
+  → HTTP POST /api/projects/{projectId}/tasks
+    body: { prompt, pipeline?, permissionMode?, execute }
+
+Backend (routes/projects.ts):
+  → Validates project exists, prompt non-empty (≤10k)
+  → IF execute=true:
+      taskStore.createTask(opts)
+        → Creates ManagedTask with status='queued' directly (no TODO step)
+        → broadcastAll({ type: 'task_created', task: { status: 'queued' } })
+        → scheduler.enqueue(taskId)
+  → IF execute=false:
+      taskStore.createTodoTask(opts)
+        → Creates ManagedTask with status='todo'
+        → persistTodoTask(task) → writes .dagclaw/tasks.json
+        → broadcastAll({ type: 'task_created', task: { status: 'todo' } })
+  → Returns 201 { id, prompt, status, ... }
+
+Frontend on 201 response:
+  → addRootTask(task) into Zustand (rootTasks[] + nodeMap)
+  → IF execute=true: selectRoot(task.id)
+  → No manual WS subscribe — auto-subscribe triggers on 'running' status
+```
+
+### 2. Task Execution (TODO → Queued → Running)
+
+```
+User clicks "Run" on a TODO TaskCard
+
+TaskCard.handleExecute()
+  → HTTP POST /api/tasks/{taskId}/execute
+
+Backend (taskStore.executeTask):
+  → Validate status === 'todo'
+  → task.status = 'queued'
+  → removeTodoPersistence(task)
+  → broadcastStatusChange → WS: { type: 'task_status_changed', old: 'todo', new: 'queued' }
+  → scheduler.enqueue(taskId)
+
+TaskScheduler.enqueue():
+  → queue.push(taskId)
+  → drain(): while (running < maxConcurrent && queue.length > 0):
+      taskId = queue.shift()
+      running.add(taskId)
+      startCallback(taskId)  [= orchestratorManager.startTask()]
+
+OrchestratorManager.startTask():
+  → task.status = 'running', task.startedAt = now
+  → broadcastStatusChange → WS: { type: 'task_status_changed', new: 'running' }
+  → Create TaskOrchestrator(cliOpts, callbacks, stageRegistry)
+  → orchestrator.run()  [async, runs in background]
+
+Frontend (wsMessageHandlers.handleTaskStatusChanged):
+  → On newStatus='running': auto-subscribe([taskId]) via WS
+  → Task now receives all execution events
+```
+
+### 3. During Execution — Callbacks → WS Broadcasts
+
+```
+TaskOrchestrator calls callbacks. Each broadcasts to task subscribers via WS:
+
+Callback               → WS Message Type          → Audience
+─────────────────────────────────────────────────────────────
+onStatus(msg)          → node_status              → task subscribers
+onStageStart(label)    → stage_start              → task subscribers
+onPlanReady(plan)      → plan_ready               → task subscribers
+onApprovalRequest(msg) → approval_required        → task subscribers
+                       + task_status_changed      → ALL clients
+onDAGEvent(event)      → tree_snapshot /          → task subscribers
+                         subtask_start /
+                         subtask_complete
+onDAGEvent (after      → usage_update             → task subscribers
+  subtask complete)
+onStageEnd()           → stage_complete +         → task subscribers
+                         usage_update
+onWarning(msg)         → node_status ([warn])     → task subscribers
+(run resolves)         → task_complete or         → task subscribers
+                         task_error               + ALL clients
+                       + task_status_changed
+
+Subtask output — special fast path:
+  Backend:  broadcast(taskId, { type: 'subtask_output', index, data })
+  Frontend: useWebSocket.onmessage
+              → type === 'subtask_output': bypass Zustand entirely
+              → call subtaskOutputListeners → xterm.js terminal directly
+```
+
+### 4. Approval Flow
+
+```
+User clicks "Approve" or "Reject" on ApprovalBanner
+
+ApprovalBanner:
+  → HTTP POST /api/tasks/{taskId}/approve   OR
+  → HTTP POST /api/tasks/{taskId}/reject { feedback? }
+
+Backend (taskStore):
+  approveTask(id):
+    → task.pendingApproval.resolve(true) — unblocks orchestrator promise
+    → task.status: awaiting_approval → running
+    → broadcastStatusChange → WS: task_status_changed (ALL)
+    → broadcast(id, { type: 'approval_resolved', approved: true })
+
+  rejectTask(id):
+    → task.pendingApproval.resolve(false) — orchestrator stops
+    → task.status: awaiting_approval → cancelled
+    → broadcastStatusChange → WS: task_status_changed (ALL)
+    → broadcast(id, { type: 'approval_resolved', approved: false })
+```
+
+### 5. Task Completion — Auto-Unsubscribe
+
+```
+Orchestrator.run() resolves (success or failure)
+
+Backend (orchestratorManager):
+  → task.status = 'completed' | 'failed'
+  → task.finishedAt = now
+  → broadcastStatusChange → WS: task_status_changed (ALL)
+  → broadcast(taskId, { type: 'task_complete' | 'task_error' })
+  → scheduler.onTaskFinished(taskId)
+
+Frontend (wsMessageHandlers):
+  handleTaskStatusChanged:
+    → On newStatus ∈ ['completed', 'failed', 'cancelled']:
+      → unsubscribe([taskId])  — auto-cleanup
+  handleTaskComplete / handleTaskError:
+    → unsubscribe([taskId])    — redundant safety
+```
+
+### 6. Cancel / Retry
+
+```
+Cancel (DetailPanel):
+  Frontend: HTTP DELETE /api/tasks/{taskId}
+  Backend:  taskStore.cancelTask(id)
+    → scheduler.dequeue(id) [if queued]
+    → task.orchestrator.shutdown() [if running]
+    → task.status → 'cancelled'
+    → broadcastStatusChange → WS: task_status_changed (ALL)
+
+Retry (DetailPanel / TaskCard):
+  Frontend: HTTP POST /api/tasks/{taskId}/retry
+  Backend:  taskStore.retryTask(id)
+    → Creates new task via createTask() (same config)
+    → New task enters full lifecycle (queued → running → ...)
+    → Returns { newId }
+  Frontend: addRootTask(newTask), selectRoot(newId)
+    → Auto-subscribe kicks in when new task reaches 'running'
+```
+
+### 7. Initial Page Load
+
+```
+User opens frontend, selects a project in ProjectSidebar
+
+ProjectSidebar.useEffect:
+  → HTTP GET /api/projects/{projectId}/tasks
+  → On response: setRootTasks(tasks) — Kanban board populates instantly
+  → Auto-subscribe to tasks with status 'running' or 'awaiting_approval'
+  → subscribeProject(projectId) via WS — for incremental live updates
+
+On clicking a completed task (DetailPanel):
+  → useEffect fetches historical data via HTTP:
+    → GET /api/tasks/{taskId}/plan → setPlan(taskId, plan)
+    → GET /api/tasks/{taskId}/verification → setVerification(taskId, result)
+    → GET /api/tasks/{taskId}/usage → setUsage(taskId, usage)
+  → Same pattern as live WS data, but from run logs on disk
+```
+
+### 8. WS Message Processing in Frontend
+
+```
+WebSocket.onmessage(event)
+  → JSON.parse → WsMessage
+  → subtask_output?  → direct to xterm.js listeners (bypass Zustand)
+  → other?           → useOrchestratorStore.getState().handleWsMessage(msg)
+                        → handlers[msg.type](get, set, msg)
+                        → auto-subscribe/unsubscribe in handleTaskStatusChanged
+                        → unknown type? push generic timeline event
+```
+
+## Subscription Model
+
+### Auto-Subscribe / Auto-Unsubscribe
+
+```
+Trigger                               Action
+─────────────────────────────────────────────────────────
+task_status_changed → running         subscribe([taskId])
+task_status_changed → completed       unsubscribe([taskId])
+task_status_changed → failed          unsubscribe([taskId])
+task_status_changed → cancelled       unsubscribe([taskId])
+task_complete message                 unsubscribe([taskId])  (safety)
+task_error message                    unsubscribe([taskId])  (safety)
+Initial HTTP load (running tasks)     subscribe([...activeIds])
+ProjectSidebar selects project        subscribeProject(projectId)
+```
+
+### Backend Routing
+
+```
+broadcastAll(msg)              → ALL connected clients
+                                 Used for: task_created, task_status_changed
+broadcast(nodeId, msg)         → Only clients subscribed to that nodeId
+                                 Used for: all execution events
+```
+
+### Message Buffering
+
+Each nodeId has a ring buffer (up to 10k buffers total). On new subscription, server replays buffered messages so the client catches up on plan, stage progress, subtask status, etc.
+
+## State Transition Diagram
+
+```
+             ┌─────────────────────────────────┐
+             │          TODO                    │
+             │  (persisted in tasks.json)       │
+             └──────────┬──────────────────────-┘
+                        │ POST /tasks/:id/execute
+                        ▼
+             ┌──────────────────────┐
+             │       QUEUED         │
+             │  (in scheduler queue)│
+             └──────────┬──────────┘
+                        │ scheduler.drain() → startTask()
+                        ▼
+             ┌──────────────────────┐
+      ┌─────►│      RUNNING         │◄──────┐
+      │      └───┬──────────┬───────┘       │
+      │          │          │               │
+      │ approve  │          │ approval      │
+      │          ▼          ▼ needed        │
+      │  ┌──────────┐  ┌──────────────┐    │
+      └──│ (continue)│  │  AWAITING    │    │
+         └──────────┘  │  APPROVAL    │────┘ approve
+                       └──────┬───────┘
+                              │ reject
+                              ▼
+                       ┌─────────────┐
+                       │  CANCELLED   │
+                       └─────────────┘
+
+   RUNNING ────success───► COMPLETED
+   RUNNING ────error──────► FAILED
+   RUNNING ────cancel─────► CANCELLED
+   QUEUED  ────cancel─────► CANCELLED
+
+When execute=true: Task goes directly to QUEUED (skips TODO)
+When execute=false: Task starts as TODO, moves to QUEUED on POST /execute
+```
+
+## Backend File Map (post-refactor)
+
+```
+backend/src/
+├── taskStore.ts              Facade — wires modules, public API
+├── taskStateMachine.ts       Task registry, queries, task number allocation
+├── taskPersistence.ts        .dagclaw/tasks.json I/O (pure functions)
+├── orchestratorManager.ts    Orchestrator lifecycle, callbacks, run completion
+├── broadcastManager.ts       WS broadcast delegation
+├── taskScheduler.ts          Concurrency-limited FIFO queue
+├── projectStore.ts           Project registry and persistence
+├── stateRestorer.ts          Load tasks from .dagclaw on server start
+├── routes/
+│   ├── tasks.ts              Task CRUD + approve/reject/cancel/retry/execute/plan/verification/usage
+│   ├── projects.ts           Project CRUD + project task creation
+│   └── runs.ts               Run history + manifests
+├── websocket/
+│   └── wsServer.ts           WS connections, subscriptions, per-node buffering
+└── middleware/
+    └── rateLimit.ts          Rate limiting
+
+frontend/src/
+├── api/
+│   └── tasks.ts              HTTP helpers (approve, reject, cancel, retry, execute, create)
+├── hooks/
+│   └── useWebSocket.ts       Singleton WS connection; exports subscribe/unsubscribe standalone
+├── stores/
+│   ├── orchestratorStore.ts  Zustand store — state, actions, selectors, fetchPlan/fetchVerification
+│   ├── wsMessageHandlers.ts  Per-type WS message handlers + auto-subscribe/unsubscribe
+│   └── projectStore.ts       Project state
+├── utils/
+│   ├── colors.ts             Shared status color maps
+│   └── formatters.ts         Shared formatting utilities
+└── components/
+    ├── ProjectSidebar.tsx    Project list + HTTP task fetch on select
+    ├── TaskCreationBar.tsx   Task prompt + pipeline + execute/TODO
+    ├── TaskCard.tsx          Task card (click = UI selection only, no WS action)
+    ├── DetailPanel.tsx       Selected task detail (fetches plan/verification for completed tasks)
+    ├── PlanView.tsx          Plan display
+    ├── ExecutionView.tsx     Subtask terminal grid
+    ├── SubtaskTerminal.tsx   xterm.js per subtask
+    ├── VerifyView.tsx        Verification results
+    ├── ApprovalBanner.tsx    Approval prompt (HTTP POST to approve/reject)
+    ├── StageIndicator.tsx    Stage progress bar
+    ├── CostDisplay.tsx       Token/cost display
+    ├── ActivityTimeline.tsx  Event log
+    └── RunHistory.tsx        Run history browser
 ```

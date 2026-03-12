@@ -12,7 +12,7 @@ The architecture supports both human-in-the-loop workflows (plan approval, retry
 |-------|--------|-----|
 | Backend | **Node.js + Express + TypeScript** | Single language with frontend, native Agent SDK support |
 | Claude integration | **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) | Structured async message iterator, session management |
-| Real-time transport | **WebSockets** (`ws` library) | Bidirectional — streaming output + control commands (approve/cancel) |
+| Real-time transport | **WebSockets** (`ws` library) | Server→client push only (streaming output, status changes); commands via REST |
 | Frontend | **React + Vite + TypeScript** | Best xterm.js ecosystem, largest community |
 | Terminal rendering | **xterm.js** (`@xterm/xterm`) | Handles ANSI codes, colors, cursor — used by VS Code |
 | Styling | **Tailwind CSS** | Rapid UI development, utility-first |
@@ -22,38 +22,42 @@ The architecture supports both human-in-the-loop workflows (plan approval, retry
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────┐
-│                 React Frontend                    │
-│  ┌──────────┐  ┌────────────┐  ┌──────────────┐ │
-│  │ TaskTree  │  │ PlanView   │  │ ExecutionView│ │
-│  │ (sidebar) │  │ (approval) │  │ (xterm.js)   │ │
-│  └─────┬────┘  └──────┬─────┘  └──────┬───────┘ │
-│        └───────────────┼───────────────┘         │
-│                  Single WebSocket                 │
-└────────────────────────┼─────────────────────────┘
-                         │
-┌────────────────────────┼─────────────────────────┐
-│                Express Backend                    │
-│                        │                          │
-│  ┌─────────────────────▼──────────────────────┐  │
-│  │            TaskManager (registry)           │  │
-│  └─────────────────────┬──────────────────────┘  │
-│                        │                          │
-│  ┌─────────────────────▼──────────────────────┐  │
-│  │         TaskOrchestrator (per node)         │  │
-│  │   stagePipeline: [Plan, Execute, Verify]    │  │
-│  └──────────────────┬────────────────────────┘   │
-│                     │ resolves StageDefinition    │
-│           ┌─────────▼──────────┐                 │
-│           │   ClaudeRunner     │ ← generic       │
-│           │ (config-driven)    │   wrapper        │
-│           │                    │                  │
-│           │ single or N ∥      │                  │
-│           │ instances per stage │                  │
-│           └────────────────────┘                  │
-│                                                   │
-│  REST: /api/tasks    WS: single global connection │
-└───────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        React Frontend                           │
+│  ┌───────────┐ ┌──────────────────┐ ┌────────────────────────┐ │
+│  │ Project   │ │ KanbanBoard      │ │ DetailPanel             │ │
+│  │ Sidebar   │ │ (TaskCards)      │ │ (PlanView, Execution   │ │
+│  │           │ │                  │ │  View, VerifyView)     │ │
+│  └───────────┘ └──────────────────┘ └────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │              TaskCreationBar (bottom)                       ││
+│  └─────────────────────────────────────────────────────────────┘│
+│          │ HTTP REST (commands/queries)    │ WebSocket (push)   │
+└──────────┼────────────────────────────────┼────────────────────┘
+           │                                │
+┌──────────┼────────────────────────────────┼────────────────────┐
+│          ▼          Express Backend        ▼                    │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │               TaskStore (facade)                         │  │
+│  │  ┌────────────────┐ ┌──────────────┐ ┌───────────────┐  │  │
+│  │  │TaskStateMachine│ │Orchestrator  │ │Broadcast      │  │  │
+│  │  │(registry,      │ │Manager       │ │Manager        │  │  │
+│  │  │ queries)       │ │(lifecycle,   │ │(WS delegation)│  │  │
+│  │  └────────────────┘ │ callbacks)   │ └───────────────┘  │  │
+│  │  ┌────────────────┐ └──────────────┘ ┌───────────────┐  │  │
+│  │  │TaskScheduler   │                  │TaskPersistence│  │  │
+│  │  │(FIFO queue)    │                  │(.dagclaw I/O) │  │  │
+│  │  └────────────────┘                  └───────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                        │                                       │
+│           ┌────────────▼─────────────┐                         │
+│           │   TaskOrchestrator       │ ← per task              │
+│           │   (core/ engine)         │                         │
+│           └──────────────────────────┘                         │
+│                                                                │
+│  REST: /api/tasks, /api/projects, /api/runs                    │
+│  WS: server→client push only (subscribe/unsubscribe from client)│
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Data Model
@@ -348,33 +352,35 @@ Registry of all TaskNodes. Responsibilities:
 
 ## WebSocket Protocol
 
-**Single global connection** — the client subscribes to specific node IDs and receives multiplexed updates.
+**Single global connection** — server→client push only. Commands (approve, reject, cancel) go through REST. The client sends only subscription management messages.
 
 ### Client → Server
 ```typescript
-| { type: "subscribe", nodeIds: string[] }
-| { type: "unsubscribe", nodeIds: string[] }
-| { type: "approve_plan", nodeId: string }
-| { type: "reject_plan", nodeId: string, feedback?: string }
-| { type: "cancel", nodeId: string }
+| { type: "subscribe", nodeId: string }
+| { type: "unsubscribe", nodeId: string }
+| { type: "subscribe_project", projectId: string }
+| { type: "unsubscribe_project", projectId: string }
+| { type: "auth", token: string }
 ```
 
 ### Server → Client
 ```typescript
-| { type: "tree_snapshot", rootNodeId: string, tree: TaskNodeSummary }
-| { type: "node_created", node: TaskNodeSummary, parentId: string | null }
-| { type: "node_status", nodeId: string, status: string }
+| { type: "task_created", task: TaskNode }
+| { type: "task_status_changed", taskId: string, status: string }
 | { type: "stage_start", nodeId: string, stage: string }
 | { type: "stage_complete", nodeId: string, stage: string, output: any }
 | { type: "subtask_start", nodeId: string, subtaskIndex: number }
 | { type: "subtask_output", nodeId: string, subtaskIndex: number, data: string }
 | { type: "subtask_complete", nodeId: string, subtaskIndex: number }
 | { type: "approval_required", nodeId: string, plan: Plan }
+| { type: "approval_resolved", nodeId: string, action: string }
+| { type: "usage_update", nodeId: string, usage: Usage }
+| { type: "project_tasks_snapshot", projectId: string, tasks: TaskNode[] }
 | { type: "verification_result", nodeId: string, result: VerificationResult }
 | { type: "retry", nodeId: string, subtaskIndex: number, attempt: number }
 ```
 
-Each node maintains a ring buffer (default 1000 lines) for late-joining clients.
+**Auto-subscription**: tasks are automatically subscribed when they enter `running` state and unsubscribed on terminal states (`completed`, `failed`, `cancelled`). Each nodeId maintains a ring buffer (up to 10k buffers) for late-joining clients — replayed on subscribe for catch-up.
 
 ## REST API
 
@@ -382,91 +388,129 @@ Each node maintains a ring buffer (default 1000 lines) for late-joining clients.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/tasks` | Create root task (prompt, workDir, pipeline, autoApprove, maxRetries, stageOverrides) |
-| GET | `/api/tasks` | List root tasks with summary |
+| GET | `/api/tasks` | List all tasks |
 | GET | `/api/tasks/:id` | Full TaskNode detail |
-| GET | `/api/tasks/:id/tree` | Full tree rooted at this node |
-| POST | `/api/tasks/:id/approve` | Approve a pending stage |
+| GET | `/api/tasks/:id/usage` | Token/cost usage for a task |
+| GET | `/api/tasks/:id/plan` | Plan data (fetched from run logs for completed tasks) |
+| GET | `/api/tasks/:id/verification` | Verification result (fetched from run logs for completed tasks) |
+| POST | `/api/tasks/:id/approve` | Approve a pending plan |
 | POST | `/api/tasks/:id/reject` | Reject with optional feedback |
 | DELETE | `/api/tasks/:id` | Cancel node and all descendants |
+| POST | `/api/tasks/:id/retry` | Retry a failed task |
+| POST | `/api/tasks/:id/execute` | Execute a task (trigger orchestration) |
 
-### Stage Definitions
+### Projects
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/stages` | List all stage definitions (built-in + custom) |
-| POST | `/api/stages` | Register a custom stage definition |
-| PUT | `/api/stages/:name` | Update a custom stage definition |
-| DELETE | `/api/stages/:name` | Remove a custom stage definition (built-ins cannot be deleted) |
+| GET | `/api/projects` | List all projects |
+| POST | `/api/projects` | Create a new project |
+| GET | `/api/projects/:id` | Get project details |
+| DELETE | `/api/projects/:id` | Delete a project |
+| GET | `/api/projects/:id/tasks` | List tasks for a project |
+| POST | `/api/projects/:id/tasks` | Create a task within a project |
+
+### Runs
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/runs` | List run history |
+| GET | `/api/runs/:runId` | Get run manifest/details |
 
 ## Project Structure
 
 ```
-claw_ui/
+dagclaw-dev/
+├── core/                              # Shared orchestration engine
+│   ├── types.ts                       # All interfaces and Zod schemas
+│   ├── claudeRunner.ts                # Claude CLI execution, prompt building
+│   ├── stageDefinitions.ts            # Built-in stage configs
+│   ├── configLoader.ts                # Custom stage loading
+│   ├── taskOrchestrator.ts            # Pipeline driver, DAG scheduling
+│   ├── dependencyResolver.ts          # Topological sort, cycle detection
+│   ├── runLogger.ts                   # Persistent logging + readPlan/readVerification
+│   ├── memoryManager.ts               # Memory storage and retrieval
+│   ├── memoryDistiller.ts             # Post-run knowledge extraction
+│   ├── promptBuilder.ts               # Template interpolation
+│   └── taskManager.ts                 # Lockfile management
+├── cli/                               # CLI entry point + terminal display
+│   ├── cli.ts                         # CLI entry, arg parsing
+│   └── dagDisplay.ts                  # Live DAG status display
 ├── backend/
-│   ├── src/
-│   │   ├── index.ts                    # Express + WS server entry
-│   │   ├── types.ts                    # All shared types
-│   │   ├── routes/
-│   │   │   ├── tasks.ts               # Task REST endpoints
-│   │   │   └── stages.ts              # Stage definition CRUD endpoints
-│   │   ├── services/
-│   │   │   ├── claudeRunner.ts         # Generic Claude Code wrapper (core abstraction)
-│   │   │   ├── stageDefinitions.ts     # Built-in stage configs + registry for custom stages
-│   │   │   ├── taskManager.ts          # Node registry + tree operations
-│   │   │   ├── taskOrchestrator.ts     # Drives node through stage pipeline (generic logic)
-│   │   │   └── dependencyResolver.ts   # DAG topological sort
-│   │   └── websocket/
-│   │       ├── wsServer.ts             # Global WS server
-│   │       ├── subscriptionManager.ts  # Client subscription tracking
-│   │       └── messageBuffer.ts        # Per-node ring buffer
-│   ├── package.json
-│   └── tsconfig.json
+│   └── src/
+│       ├── index.ts                   # Express + WS server entry
+│       ├── taskStore.ts               # Facade: wires modules, public API
+│       ├── taskStateMachine.ts         # Task registry, queries, number allocation
+│       ├── taskPersistence.ts          # .dagclaw/tasks.json I/O
+│       ├── orchestratorManager.ts      # Orchestrator lifecycle, callbacks
+│       ├── broadcastManager.ts         # WS broadcast delegation
+│       ├── taskScheduler.ts            # Concurrency-limited FIFO queue
+│       ├── projectStore.ts             # Project registry
+│       ├── stateRestorer.ts            # Load state from .dagclaw on startup
+│       ├── routes/
+│       │   ├── tasks.ts               # Task CRUD + approve/reject/cancel/retry/execute + plan/verification/usage
+│       │   ├── projects.ts            # Project CRUD + project task creation
+│       │   └── runs.ts                # Run history + manifests
+│       ├── websocket/
+│       │   └── wsServer.ts            # WS connections, subscriptions, buffering
+│       └── middleware/
+│           └── rateLimit.ts           # Rate limiting
 ├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                     # Root layout
-│   │   ├── types.ts                    # Frontend types
-│   │   ├── components/
-│   │   │   ├── Sidebar.tsx             # Root task list + create button
-│   │   │   ├── CreateTaskForm.tsx      # Prompt, workDir, pipeline config
-│   │   │   ├── TaskTreeView.tsx        # Tree visualization
-│   │   │   ├── TaskTreeNode.tsx        # Recursive tree node component
-│   │   │   ├── StageIndicator.tsx      # Colored stage progress bar
-│   │   │   ├── DetailPanel.tsx         # Selected node detail view
-│   │   │   ├── PlanView.tsx            # Plan display + approve/reject
-│   │   │   ├── ExecutionView.tsx       # Grid of subtask terminals
-│   │   │   ├── SubtaskTerminal.tsx     # xterm.js per subtask
-│   │   │   ├── VerifyView.tsx          # Verification results
-│   │   │   └── ApprovalBanner.tsx      # Floating approval prompt
-│   │   ├── hooks/
-│   │   │   ├── useWebSocket.ts         # Single global WS connection
-│   │   │   └── useTerminalOutput.ts    # Writes WS messages to xterm ref
-│   │   └── stores/
-│   │       └── orchestratorStore.ts    # Task tree state + UI state
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tailwind.config.js
-├── package.json                         # Root workspace (npm workspaces)
-├── README.md
-├── PLAN.md
-└── CLAUDE.md
+│   └── src/
+│       ├── App.tsx                    # Root layout
+│       ├── types.ts                   # Frontend types
+│       ├── api/
+│       │   └── tasks.ts              # HTTP helpers (approve, reject, cancel, etc.)
+│       ├── components/
+│       │   ├── ProjectSidebar.tsx     # Project list + HTTP task fetch on select
+│       │   ├── TaskCreationBar.tsx    # Task prompt + pipeline + execute/TODO
+│       │   ├── TaskCard.tsx           # Single task card (click = UI selection only)
+│       │   ├── DetailPanel.tsx        # Selected task detail (auto-fetches plan/verification)
+│       │   ├── PlanView.tsx           # Plan display
+│       │   ├── ExecutionView.tsx      # Subtask terminals
+│       │   ├── SubtaskTerminal.tsx    # xterm.js per subtask
+│       │   ├── VerifyView.tsx         # Verification results
+│       │   ├── ApprovalBanner.tsx     # Approval prompt
+│       │   ├── StageIndicator.tsx     # Stage progress bar
+│       │   ├── CostDisplay.tsx        # Token/cost display
+│       │   ├── ActivityTimeline.tsx   # Event log
+│       │   └── RunHistory.tsx         # Run history browser
+│       ├── hooks/
+│       │   └── useWebSocket.ts        # Singleton WS + exported subscribe/unsubscribe
+│       ├── stores/
+│       │   ├── orchestratorStore.ts   # Zustand: state, actions, selectors, fetchPlan/fetchVerification
+│       │   ├── wsMessageHandlers.ts   # Per-type WS handlers + auto-subscribe/unsubscribe
+│       │   └── projectStore.ts        # Project state
+│       └── utils/
+│           ├── colors.ts             # Status color maps
+│           └── formatters.ts         # Shared formatting
+├── scripts/                          # Server start/stop
+└── docs/                             # Architecture docs
 ```
 
 ## Frontend Architecture
 
 ### Layout
-- **Left sidebar**: list of root tasks with status badges, "New Task" button
-- **Center**: `TaskTreeView` — indented tree of all nodes for the selected root task, each showing a `StageIndicator` (colored segments: gray=pending, blue=running, green=done, red=failed, yellow=awaiting approval)
-- **Right/bottom**: `DetailPanel` — detail view for the selected node, switching between `PlanView`, `ExecutionView`, or `VerifyView` based on the current stage
+- **Left**: `ProjectSidebar` — project list, fetches tasks via HTTP on project select
+- **Center**: `KanbanBoard` with `TaskCard` components — task cards showing status, stage, cost; click selects (UI only, no navigation)
+- **Right**: `DetailPanel` — selected task detail, auto-fetches plan/verification from run logs; switches between `PlanView`, `ExecutionView`, or `VerifyView` based on current stage
+- **Bottom**: `TaskCreationBar` — always-visible task prompt input with pipeline config and execute button
 
 ### State Management (Zustand)
-- `rootTasks[]` — top-level task summaries
-- `nodeMap: Map<id, TaskNodeSummary>` — flat lookup for all nodes
-- `selectedRootId`, `selectedNodeId`, `expandedNodes` — UI state
-- WebSocket message handlers update the store; React components subscribe via selectors
+- `rootTasks[]` — top-level task list
+- `nodeMap: Map<id, TaskNode>` — flat lookup for all nodes
+- `plans: Map<id, Plan>`, `verifications: Map<id, VerificationResult>`, `usage: Map<id, Usage>` — per-task cached data
+- `selectedTaskId` — UI selection state
+- `wsMessageHandlers.ts` — per-type WS message dispatch (task_created, task_status_changed, approval_required, etc.) with auto-subscribe/unsubscribe logic
+
+### Communication Model
+- **HTTP REST** for initial data load (task list, project list) and commands (approve, reject, cancel, retry, execute, fetch plan/verification/usage)
+- **WebSocket** for real-time server→client push only (status changes, streaming output, approval prompts, usage updates)
+- **Auto-subscription**: running tasks are auto-subscribed for streaming; terminal states trigger auto-unsubscribe
+- Completed tasks: plan and verification data loaded on demand via HTTP from run logs (`runLogger.readPlan`, `runLogger.readVerification`)
 
 ### Streaming Output
 - `subtask_output` messages are written directly to xterm.js refs, NOT stored in Zustand (too high volume)
 - xterm.js itself is the buffer for terminal content
-- Ring buffer replay on subscribe handles late-joining
+- Ring buffer replay on subscribe handles late-joining (up to 10k buffers per nodeId)
 
 ## Current Status (v0.1.0)
 
@@ -501,7 +545,7 @@ DAGClaw v0.1.0 is a working multi-stage recursive orchestration engine with CLI,
 - Memory injection is a full dump of all files (no selective retrieval — planned for v0.2)
 - Verify stage does not receive memory context
 - No plan replay or per-subtask resume
-- Frontend lacks: activity timeline, cost/token display, context visualization, run history browser
+- Frontend lacks: context visualization
 - No context budget enforcement (prompt assembly has no size limits)
 - No plan replay / dry run mode
 - No per-subtask resume on failure
