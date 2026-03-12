@@ -231,20 +231,27 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         break;
 
       case 'approval_resolved':
-        store.updateTaskStatus(msg.taskId, msg.approved ? 'running' : 'failed');
+        store.updateTaskStatus(msg.taskId, msg.approved ? 'running' : 'cancelled');
         set((state) => {
           const nodeMap = new Map(state.nodeMap);
           const existing = nodeMap.get(msg.taskId);
           if (existing) {
             nodeMap.set(msg.taskId, {
               ...existing,
-              status: msg.approved ? 'running' : 'failed',
+              status: msg.approved ? 'running' : 'cancelled',
               hasPendingApproval: false,
               pendingApprovalMessage: undefined,
             });
           }
           return { nodeMap };
         });
+        if (!msg.approved) {
+          set((state) => {
+            const stageInfo = new Map(state.stageInfo);
+            stageInfo.set(msg.taskId, { currentStage: 'Cancelled', status: 'cancelled' });
+            return { stageInfo };
+          });
+        }
         pushEvent(msg.taskId, msg.type, `Plan ${msg.approved ? 'approved' : 'rejected'}`);
         break;
 

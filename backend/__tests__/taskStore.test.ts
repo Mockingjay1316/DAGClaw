@@ -89,7 +89,8 @@ describe('TaskStore', () => {
     const result = store.rejectTask('test-reject', 'not good enough');
     assert.equal(result, true);
     assert.equal(resolved, false);
-    assert.equal(task.status, 'failed');
+    assert.equal(task.status, 'cancelled');
+    assert.ok(task.finishedAt, 'finishedAt should be set on rejection');
     assert.equal(task.pendingApproval, undefined);
   });
 

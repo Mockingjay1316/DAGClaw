@@ -222,10 +222,27 @@ export class TaskStore {
       (result) => {
         task.runId = result.runId;
         const old = task.status;
-        task.status = 'completed';
-        task.finishedAt = new Date().toISOString();
-        this.broadcastStatusChange(task, old);
-        this.wsServer?.broadcast(taskId, { type: 'task_complete', taskId });
+        if (result.success) {
+          task.status = 'completed';
+          task.finishedAt = new Date().toISOString();
+          this.broadcastStatusChange(task, old);
+          this.wsServer?.broadcast(taskId, { type: 'task_complete', taskId });
+        } else {
+          // Plan was rejected or run failed without throwing.
+          // rejectTask() may have already set a terminal status — respect it.
+          if (old !== 'failed' && old !== 'cancelled') {
+            task.status = 'failed';
+          }
+          task.finishedAt = task.finishedAt ?? new Date().toISOString();
+          if (task.status !== old) {
+            this.broadcastStatusChange(task, old);
+          }
+          this.wsServer?.broadcast(taskId, {
+            type: 'task_error',
+            taskId,
+            error: 'Run did not complete successfully',
+          });
+        }
         this.scheduler?.onTaskFinished(taskId);
       },
       (err: unknown) => {
@@ -312,7 +329,8 @@ export class TaskStore {
     task.pendingApproval.resolve(false);
     task.pendingApproval = undefined;
     const old = task.status;
-    task.status = 'failed';
+    task.status = 'cancelled';
+    task.finishedAt = new Date().toISOString();
     this.broadcastStatusChange(task, old);
     this.wsServer?.broadcast(id, { type: 'approval_resolved', taskId: id, approved: false });
     return true;
