@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useProjectStore } from '../stores/projectStore.ts';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
-import { useWebSocket } from '../hooks/useWebSocket.ts';
 
 interface TaskCreationBarProps {
   style?: React.CSSProperties;
@@ -12,7 +11,6 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId);
   const addRootTask = useOrchestratorStore((s) => s.addRootTask);
   const selectRoot = useOrchestratorStore((s) => s.selectRoot);
-  const { subscribe } = useWebSocket();
 
   const [prompt, setPrompt] = useState('');
   const [pipeline, setPipeline] = useState('Plan,Execute,Verify');
@@ -58,7 +56,6 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
       addRootTask(task);
       if (execute) {
         selectRoot(task.id);
-        subscribe([task.id]);
       }
       setPrompt('');
     } catch (err) {

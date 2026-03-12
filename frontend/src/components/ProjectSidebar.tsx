@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../stores/projectStore.ts';
+import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 import { useWebSocket } from '../hooks/useWebSocket.ts';
+import { subscribe } from '../hooks/useWebSocket.ts';
 
 export function ProjectSidebar() {
   const projects = useProjectStore((s) => s.projects);
@@ -11,6 +13,7 @@ export function ProjectSidebar() {
   const selectProject = useProjectStore((s) => s.selectProject);
   const error = useProjectStore((s) => s.error);
 
+  const setRootTasks = useOrchestratorStore((s) => s.setRootTasks);
   const { subscribeProject, unsubscribeProject } = useWebSocket();
 
   const [showAdd, setShowAdd] = useState(false);
@@ -21,13 +24,29 @@ export function ProjectSidebar() {
     fetchProjects();
   }, [fetchProjects]);
 
-  // Subscribe to selected project's WS events
+  // Fetch tasks via HTTP on project select, then subscribe WS for live updates
   useEffect(() => {
     if (selectedProjectId) {
+      // Fetch initial tasks via HTTP (instant load, no WS dependency)
+      fetch(`/api/projects/${selectedProjectId}/tasks`)
+        .then(res => res.ok ? res.json() : [])
+        .then((tasks: Array<{ id: string; status: string }>) => {
+          setRootTasks(tasks as Parameters<typeof setRootTasks>[0]);
+          // Auto-subscribe to running/awaiting_approval tasks for live updates
+          const activeIds = tasks
+            .filter(t => t.status === 'running' || t.status === 'awaiting_approval')
+            .map(t => t.id);
+          if (activeIds.length > 0) {
+            subscribe(activeIds);
+          }
+        })
+        .catch(() => { /* silently ignore */ });
+
+      // Also subscribe via WS for incremental live updates (task_created, task_status_changed)
       subscribeProject(selectedProjectId);
       return () => unsubscribeProject(selectedProjectId);
     }
-  }, [selectedProjectId, subscribeProject, unsubscribeProject]);
+  }, [selectedProjectId, subscribeProject, unsubscribeProject, setRootTasks]);
 
   async function handleAddProject(e: React.FormEvent) {
     e.preventDefault();

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
-import { useWebSocket } from '../hooks/useWebSocket.ts';
+import { cancelTask as cancelTaskApi } from '../api/tasks.ts';
 import { PlanView } from './PlanView.tsx';
 import { ApprovalBanner } from './ApprovalBanner.tsx';
 import { ExecutionView } from './ExecutionView.tsx';
@@ -31,8 +31,9 @@ export function DetailPanel() {
     state.selectedNodeId ? state.usage.get(state.selectedNodeId) : undefined
   );
   const fetchUsage = useOrchestratorStore((state) => state.fetchUsage);
+  const fetchPlan = useOrchestratorStore((state) => state.fetchPlan);
+  const fetchVerification = useOrchestratorStore((state) => state.fetchVerification);
 
-  const { cancelTask } = useWebSocket();
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const updateTaskStatus = useOrchestratorStore((state) => state.updateTaskStatus);
   const addRootTask = useOrchestratorStore((state) => state.addRootTask);
@@ -41,15 +42,21 @@ export function DetailPanel() {
   const [activityOpen, setActivityOpen] = useState(false);
 
   useEffect(() => {
-    if (selectedNodeId && task?.status === 'completed' && !usage) {
-      fetchUsage(selectedNodeId);
+    if (selectedNodeId && (task?.status === 'completed' || task?.status === 'failed')) {
+      if (!usage) fetchUsage(selectedNodeId);
+      if (!plan) fetchPlan(selectedNodeId);
+      if (!verification) fetchVerification(selectedNodeId);
     }
-  }, [selectedNodeId, task?.status, usage, fetchUsage]);
+  }, [selectedNodeId, task?.status, usage, plan, verification, fetchUsage, fetchPlan, fetchVerification]);
 
-  function handleCancel() {
+  async function handleCancel() {
     if (!selectedNodeId) return;
-    cancelTask(selectedNodeId);
-    updateTaskStatus(selectedNodeId, 'cancelled');
+    try {
+      await cancelTaskApi(selectedNodeId);
+      updateTaskStatus(selectedNodeId, 'cancelled');
+    } catch {
+      // Best-effort
+    }
     setShowCancelConfirm(false);
   }
 

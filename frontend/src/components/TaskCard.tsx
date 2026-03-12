@@ -1,47 +1,8 @@
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
-import { useWebSocket } from '../hooks/useWebSocket.ts';
-import type { TaskSummary, TaskStatus } from '../types.ts';
+import type { TaskSummary } from '../types.ts';
 import { CostDisplay } from './CostDisplay.tsx';
-
-const statusColors: Record<string, string> = {
-  todo: 'border-l-gray-500',
-  queued: 'border-l-yellow-600',
-  running: 'border-l-blue-500',
-  awaiting_approval: 'border-l-yellow-500',
-  pending: 'border-l-yellow-500',
-  completed: 'border-l-green-500',
-  failed: 'border-l-red-500',
-  cancelled: 'border-l-gray-500',
-};
-
-const statusDots: Record<string, string> = {
-  todo: 'bg-gray-500',
-  queued: 'bg-yellow-600',
-  running: 'bg-blue-500 animate-pulse',
-  awaiting_approval: 'bg-yellow-500 animate-pulse',
-  pending: 'bg-yellow-500',
-  completed: 'bg-green-500',
-  failed: 'bg-red-500',
-  cancelled: 'bg-gray-500',
-};
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max) + '\u2026' : text;
-}
-
-function formatElapsed(startedAt?: string, finishedAt?: string): string | null {
-  if (!startedAt || !finishedAt) return null;
-  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
-  if (ms < 0) return null;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainSec = seconds % 60;
-  if (minutes < 60) return `${minutes}m ${remainSec}s`;
-  const hours = Math.floor(minutes / 60);
-  const remainMin = minutes % 60;
-  return `${hours}h ${remainMin}m`;
-}
+import { statusColors, statusDots } from '../utils/colors.ts';
+import { truncate, formatElapsed } from '../utils/formatters.ts';
 
 function formatFinishedTime(finishedAt?: string): string | null {
   if (!finishedAt) return null;
@@ -62,23 +23,18 @@ export function TaskCard({ task }: TaskCardProps) {
   const selectedNodeId = useOrchestratorStore((s) => s.selectedNodeId);
   const selectRoot = useOrchestratorStore((s) => s.selectRoot);
   const addRootTask = useOrchestratorStore((s) => s.addRootTask);
-  const { subscribe } = useWebSocket();
 
   const isSelected = selectedNodeId === task.id;
   const stageInfo = useOrchestratorStore((s) => s.stageInfo.get(task.id));
 
   function handleClick() {
     selectRoot(task.id);
-    subscribe([task.id]);
   }
 
   async function handleExecute(e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      const res = await fetch(`/api/tasks/${task.id}/execute`, { method: 'POST' });
-      if (res.ok) {
-        subscribe([task.id]);
-      }
+      await fetch(`/api/tasks/${task.id}/execute`, { method: 'POST' });
     } catch {
       // Ignore
     }
@@ -91,7 +47,6 @@ export function TaskCard({ task }: TaskCardProps) {
       if (res.ok) {
         const { id: newId } = await res.json();
         addRootTask({ id: newId, prompt: task.prompt, workDir: task.workDir, projectId: task.projectId, status: 'queued', runId: null });
-        subscribe([newId]);
       }
     } catch {
       // Ignore

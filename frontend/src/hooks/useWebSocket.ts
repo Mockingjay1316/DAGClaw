@@ -171,22 +171,6 @@ function unsubscribeProject(projectId: string) {
   send({ type: 'unsubscribe_project', projectId });
 }
 
-function approvePlan(taskId: string) {
-  send({ type: 'approve_plan', taskId });
-}
-
-function rejectPlan(taskId: string, feedback?: string) {
-  send({ type: 'reject_plan', taskId, feedback });
-}
-
-function cancelTask(taskId: string) {
-  send({ type: 'cancel', taskId });
-}
-
-function executeTask(taskId: string) {
-  send({ type: 'execute_task', taskId });
-}
-
 // --- React hook ---
 
 export function useWebSocket() {
@@ -200,16 +184,10 @@ export function useWebSocket() {
   }, []);
 
   return {
-    subscribe,
-    unsubscribe,
     subscribeProject,
     unsubscribeProject,
-    approvePlan,
-    rejectPlan,
-    cancelTask,
-    executeTask,
     connected: isConnected,
   };
 }
 
-export { connect, disconnect };
+export { connect, disconnect, subscribe, unsubscribe };

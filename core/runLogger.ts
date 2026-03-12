@@ -135,6 +135,28 @@ export class RunLogger {
     this.writeManifest(runId, manifest);
   }
 
+  /** Read plan from run directory. Returns null if not found. */
+  readPlan(runId: string): Plan | null {
+    const planPath = path.join(this.runDir(runId), 'plan.json');
+    try {
+      const data = fs.readFileSync(planPath, 'utf-8');
+      return JSON.parse(data) as Plan;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Read latest verification result from run directory. Returns null if not found. */
+  readVerification(runId: string): VerificationResult | null {
+    const verifyPath = path.join(this.runDir(runId), 'verification.json');
+    try {
+      const data = fs.readFileSync(verifyPath, 'utf-8');
+      return JSON.parse(data) as VerificationResult;
+    } catch {
+      return null;
+    }
+  }
+
   /** Write plan output to run directory. */
   writePlan(runId: string, plan: Plan): void {
     const planPath = path.join(this.runDir(runId), 'plan.json');
