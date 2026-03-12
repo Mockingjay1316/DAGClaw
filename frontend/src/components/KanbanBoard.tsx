@@ -14,8 +14,8 @@ export function KanbanBoard() {
     const groups: Record<string, TaskSummary[]> = {};
     for (const col of KANBAN_COLUMNS) {
       let colTasks = tasks.filter(t => col.statuses.includes(t.status));
-      // Sort done column: newest finished first
-      if (col.key === 'done') {
+      // Sort done and failed columns: newest finished first
+      if (col.key === 'done' || col.key === 'failed') {
         colTasks = [...colTasks].sort((a, b) => {
           const aTime = a.finishedAt ? new Date(a.finishedAt).getTime() : 0;
           const bTime = b.finishedAt ? new Date(b.finishedAt).getTime() : 0;
