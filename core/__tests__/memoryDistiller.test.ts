@@ -211,6 +211,34 @@ describe('memoryDistiller', () => {
       await assert.doesNotReject(() => distillMemory('run-123', state, logger, memoryManager, opts, throwingRunner as any));
     });
 
+    it('writes error to stderr when distillation fails', async () => {
+      const throwingRunner = mock.fn(async () => {
+        throw new Error('Claude CLI failed');
+      });
+
+      const state = makeMockState();
+      const logger = makeMockLogger();
+      const memoryManager = makeMockMemoryManager();
+      const opts = makeMockOpts();
+
+      const chunks: string[] = [];
+      const origWrite = process.stderr.write;
+      process.stderr.write = ((chunk: string | Uint8Array) => {
+        chunks.push(chunk.toString());
+        return true;
+      }) as typeof process.stderr.write;
+
+      try {
+        await distillMemory('run-123', state, logger, memoryManager, opts, throwingRunner as any);
+      } finally {
+        process.stderr.write = origWrite;
+      }
+
+      const output = chunks.join('');
+      assert.ok(output.includes('Memory distillation failed'), 'should log failure message to stderr');
+      assert.ok(output.includes('Claude CLI failed'), 'should include the original error message');
+    });
+
     it('passes model=sonnet by default to runner', async () => {
       const state = makeMockState();
       const logger = makeMockLogger();
