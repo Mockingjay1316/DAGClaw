@@ -198,9 +198,15 @@ Agents write structured JSON to run-scoped tmp dirs (`.dagclaw/runs/<runId>/tmp/
 - Verify → `.dagclaw/runs/<runId>/tmp/verification.json` (VerificationResultSchema)
 
 **Backend selection logic (v0.1.0):**
-- CLI backend: spawns `claude -p --output-format stream-json` as subprocess. No API key needed — uses Claude Code's own auth.
+- CLI backend: spawns `claude -p --output-format stream-json` as subprocess. No API key needed — uses Claude Code's own auth. Always passes `--dangerously-skip-permissions` because `-p` mode is one-shot (no stdin back-and-forth for permission prompts). Tool access is restricted via `--allowedTools` per stage instead.
 - SDK backend: placeholder for future Agent SDK integration. `--backend sdk` or `--backend cli` to select.
-- Custom CLI command backends deferred to v0.2+.
+
+**Agent SDK backend (future):**
+The Agent SDK (`@anthropic-ai/claude-agent-sdk`) enables interactive user-Claude dialog via `canUseTool` callbacks. Key benefits over CLI subprocess:
+- **User interaction during planning**: intercept `AskUserQuestion` tool calls, forward questions to the user (via WebSocket for web UI, terminal prompt for CLI), return answers to Claude. This lets the planner ask clarifying questions ("New module or integrate into existing?") before finalizing the plan.
+- **Granular permission control**: intercept tool use requests per-call instead of blanket `--dangerously-skip-permissions`. The user can approve/deny individual actions from the UI.
+- **No subprocess overhead**: direct in-process execution via `query()` instead of spawning child processes.
+The CLI backend's `--dangerously-skip-permissions` + `--allowedTools` approach remains appropriate for Execute-stage subtasks where autonomous execution is desired.
 
 **Context flow via snapshots:**
 Each subtask produces a `ContextSnapshot` on completion. The stage's `resultHandler` stores snapshots in `PipelineState.subtaskSnapshots`. Dependent subtasks receive predecessor context via `contextBuilder`. This enables clean parallel forking (all Execute subtasks inherit Plan context) and DAG accumulation (dependent subtasks get predecessors' snapshots).
@@ -909,6 +915,14 @@ This gives users a natural "pick up where I left off" workflow.
 - ~~**Run history browser**~~ — Paginated run list (20/page) with status badges, expandable detail (cost table, subtask tree, git info). History toggle in sidebar.
 - ~~**Task lifecycle controls**~~ — Cancel button with confirmation dialog, Retry button for failed/cancelled tasks. `POST /api/tasks/:id/retry` endpoint.
 
+### v0.1.2 — Real-time streaming
+
+**Backend:**
+- **NDJSON stream forwarding** — `runClaudeCli` currently buffers all stdout until process exit. Add an `onStreamEvent` callback that parses complete NDJSON lines as they arrive and forwards them to the orchestrator. Requires a line buffer (stdout `data` events don't guarantee complete lines). The orchestrator broadcasts parsed events via `subtask_output` WebSocket messages (type already defined, not yet emitted).
+
+**Frontend:**
+- **Live Claude output** — Display streamed Claude responses in real time: text as it generates, tool use requests ("Reading file X..."), tool results, plan forming progressively. `subtask_output` WS handler and xterm.js terminal plumbing already exist as placeholders.
+
 ### v0.2 — Context management + visualization
 
 **Backend:**
@@ -918,6 +932,7 @@ This gives users a natural "pick up where I left off" workflow.
 - **Per-subtask resume** — `--resume <runId>` reloads plan, skips completed subtasks, re-runs from failure point.
 - **Stage lifecycle hooks** — `preRun?` / `postRun?` on StageDefinition. Two hooks only, orchestrator stays stage-agnostic.
 - **Sandbox abstraction** — `sandbox?: 'shared' | 'worktree'` per subtask. Git worktree lifecycle management.
+- **Agent SDK backend** — Implement `{ type: 'sdk' }` backend using `@anthropic-ai/claude-agent-sdk` `query()`. `canUseTool` callback enables interactive planning (forward `AskUserQuestion` to user via WS/terminal) and granular permission control. CLI backend remains for autonomous Execute-stage subtasks.
 
 **Frontend:**
 - Context flow visualization (what context each subtask receives)

@@ -209,7 +209,7 @@ Pure functions + one async executor. No class.
 
 **`ClaudeRunError`** — error subclass with `partialOutput` and `exitCode` fields. Thrown by `runClaudeCli` on non-zero exit or timeout. The orchestrator's retry logic treats all `ClaudeRunError` as retryable.
 
-**Note:** `RunClaudeOptions.backend` is typed as `RunnerBackend` (`cli` | `sdk`) but `runClaudeCli` always spawns the CLI — SDK backend is a future placeholder.
+**Note:** `RunClaudeOptions.backend` is typed as `RunnerBackend` (`cli` | `sdk`) but `runClaudeCli` always spawns the CLI — SDK backend is a future placeholder. `dangerouslySkipPermissions` is always `true` because `claude -p` is one-shot (no stdin back-and-forth for permission prompts); tool access is restricted via `--allowedTools` per stage instead. The future Agent SDK backend will enable interactive user-Claude dialog (especially during planning) via `canUseTool` callbacks — see PLAN.md v0.2.
 
 ### `core/stageDefinitions.ts` — Stage Configs
 
