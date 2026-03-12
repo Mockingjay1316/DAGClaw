@@ -14,7 +14,7 @@ core/                          Shared orchestration engine
 ├── claudeRunner.ts            Spawns `claude -p` subprocesses, parses output, tracks cost.
 ├── stageDefinitions.ts        Stage configs: Plan, Execute, Verify. All stage-specific logic lives here.
 ├── configLoader.ts            Custom stage loading from dagclaw.config.json/.ts, merging with builtins.
-├── promptBuilder.ts           Template interpolation and snapshot formatting.
+├── promptBuilder.ts           Template interpolation ({{key}} replacement).
 ├── dependencyResolver.ts      Topological sort for the subtask DAG.
 ├── taskManager.ts             Lockfile management and task node factory.
 ├── runLogger.ts               Writes manifests, logs, prompts, and verification results to disk.
