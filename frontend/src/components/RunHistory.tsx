@@ -39,12 +39,6 @@ function RunDetail({
   onBack: () => void;
 }) {
   const stageEntries = Object.entries(run.usage.perStage);
-  const children = (run.tree?.children ?? []) as Array<{
-    index: number;
-    description: string;
-    status: string;
-    stage: string;
-  }>;
 
   return (
     <div className="p-4">
@@ -102,26 +96,6 @@ function RunDetail({
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* Subtask tree */}
-      {children.length > 0 && (
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-white mb-2">Subtasks</h3>
-          <div className="space-y-1">
-            {children.map((child, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-3 text-sm py-1.5 px-2 rounded bg-gray-800/50"
-              >
-                <span className="text-gray-500 font-mono w-6 text-right">{child.index}</span>
-                <span className="text-gray-300 flex-1">{child.description}</span>
-                <StatusBadge status={child.status} />
-                <span className="text-gray-500 text-xs capitalize">{child.stage}</span>
-              </div>
-            ))}
-          </div>
         </div>
       )}
 

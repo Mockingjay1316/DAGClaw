@@ -78,6 +78,7 @@ TaskOrchestrator.run()
 │     │  │ backend: "cli"                                │
 │     │  │ permissionMode: "auto" | "interactive" | ...  │
 │     │  │ gitInfo?: {branch, commitBefore, ...}         │
+│     │  │ taskNumber?: number                           │
 │     │  └───────────────────────────────────────────────┘
 │     → returns runId: string
 │     → creates .dagclaw/runs/<runId>/manifest.json

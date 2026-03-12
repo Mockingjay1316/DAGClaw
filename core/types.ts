@@ -233,14 +233,6 @@ export interface TaskNode {
 
 // --- Run Manifest ---
 
-export interface TaskNodeSummary {
-  id: string;
-  prompt: string;
-  status: TaskStatus;
-  stages: Record<string, StageState>;
-  children: TaskNodeSummary[];
-}
-
 export interface RunManifest {
   id: string;
   prompt: string;
@@ -252,7 +244,7 @@ export interface RunManifest {
   startedAt: string;
   completedAt: string | null;
   duration: number | null;
-  tree: TaskNodeSummary;
+  taskNumber?: number;
   usage: {
     totalInputTokens: number;
     totalOutputTokens: number;
@@ -301,4 +293,5 @@ export interface CliOptions {
   model?: string;
   dagModel?: string;
   distillModel?: string;
+  taskNumber?: number;
 }

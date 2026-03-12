@@ -196,6 +196,7 @@ export class TaskOrchestrator {
     const runId = this.logger.initRun({
       prompt: this.opts.prompt, pipeline: this.opts.pipeline,
       backend: this.opts.backend.type, permissionMode: this.opts.permissionMode, gitInfo,
+      taskNumber: this.opts.taskNumber,
     });
     this.currentRunId = runId;
     if (!this.isChild) acquireLock(this.opts.workDir, runId);

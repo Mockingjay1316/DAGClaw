@@ -184,6 +184,7 @@ export class TaskStore {
       noSummary: true,
       noMemory: false,
       dagStages: ['Execute'],
+      taskNumber: task.taskNumber,
     };
 
     const callbacks = this.buildCallbacks(task);

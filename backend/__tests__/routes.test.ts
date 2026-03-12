@@ -116,7 +116,6 @@ function createTestManifest(id: string, overrides?: Partial<RunManifest>): RunMa
     startedAt: '2026-03-09T10:00:00.000Z',
     completedAt: '2026-03-09T10:05:00.000Z',
     duration: 300000,
-    tree: { id, prompt: `Test task ${id}`, status: 'completed', stages: {}, children: [] },
     usage: {
       totalInputTokens: 1000,
       totalOutputTokens: 500,
@@ -522,7 +521,7 @@ describe('Run history routes', () => {
     assert.equal(body.status, 'completed');
     assert.ok(body.usage, 'should have usage field');
     assert.equal(body.usage.totalInputTokens, 1000);
-    assert.ok(body.tree, 'should have tree field');
+    assert.ok(body.pipeline, 'should have pipeline field');
   });
 
   it('GET /api/runs/:id → 404 when run not found', async () => {

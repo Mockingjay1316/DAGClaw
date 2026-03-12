@@ -109,39 +109,6 @@ export function createTasksRouter(taskStore: TaskStore): Router {
     }
   });
 
-  // GET /api/tasks/:id/tree — get task tree from run manifest
-  router.get('/api/tasks/:id/tree', async (req: Request, res: Response) => {
-    try {
-      const id = req.params.id as string;
-      const task = taskStore.getTask(id);
-      if (!task) {
-        res.status(404).json({ error: 'Task not found' });
-        return;
-      }
-      if (!task.runId) {
-        res.status(404).json({ error: 'No run associated with task' });
-        return;
-      }
-      const logger = new RunLogger(task.workDir);
-      let manifest;
-      try {
-        manifest = logger.readManifest(task.runId);
-      } catch (readErr: unknown) {
-        if (readErr && typeof readErr === 'object' && 'code' in readErr && (readErr as { code: string }).code === 'ENOENT') {
-          res.status(404).json({ error: 'Run manifest not found' });
-          return;
-        }
-        console.error('[tasks] Error reading manifest:', readErr);
-        res.status(500).json({ error: 'Internal server error' });
-        return;
-      }
-      res.status(200).json(manifest.tree);
-    } catch (err) {
-      console.error('[tasks] Error:', err);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-
   // GET /api/tasks/:id/usage — get task usage from run manifest
   router.get('/api/tasks/:id/usage', async (req: Request, res: Response) => {
     try {

@@ -148,13 +148,7 @@ export interface RunManifest {
   startedAt: string;
   completedAt: string | null;
   duration: number | null;
-  tree: {
-    index: number;
-    description: string;
-    status: string;
-    stage: string;
-    children: unknown[];
-  };
+  taskNumber?: number;
   usage: {
     totalInputTokens: number;
     totalOutputTokens: number;

@@ -20,6 +20,7 @@ export interface InitRunOptions {
   backend: string;
   permissionMode: PermissionMode;
   gitInfo?: RunManifest['gitInfo'];
+  taskNumber?: number;
 }
 
 export interface RunSummary {
@@ -100,7 +101,7 @@ export class RunLogger {
       startedAt: new Date().toISOString(),
       completedAt: null,
       duration: null,
-      tree: { id: runId, prompt: options.prompt, status: 'running', stages: {}, children: [] },
+      taskNumber: options.taskNumber,
       usage: emptyUsage(),
       gitInfo: options.gitInfo,
     };

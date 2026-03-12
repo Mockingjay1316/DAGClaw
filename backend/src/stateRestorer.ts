@@ -147,7 +147,7 @@ function restoreRunTasks(
           createdAt: manifest.startedAt ?? new Date().toISOString(),
           startedAt: manifest.startedAt ?? new Date().toISOString(),
           finishedAt: manifest.completedAt ?? undefined,
-          taskNumber: 0,
+          taskNumber: manifest.taskNumber ?? 0,
         };
 
         taskStore.registerTask(task);

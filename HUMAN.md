@@ -379,7 +379,6 @@ The backend wraps the core orchestration engine in an Express + WebSocket server
 | `POST` | `/api/tasks` | Create a task (prompt, workDir, pipeline, autoApprove) |
 | `GET` | `/api/tasks` | List all tasks |
 | `GET` | `/api/tasks/:id` | Get task detail |
-| `GET` | `/api/tasks/:id/tree` | Get task tree from run manifest |
 | `POST` | `/api/tasks/:id/approve` | Approve a pending plan |
 | `POST` | `/api/tasks/:id/reject` | Reject a pending plan |
 | `DELETE` | `/api/tasks/:id` | Cancel a running task |
