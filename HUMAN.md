@@ -109,7 +109,7 @@ Read this first. Everything else depends on it.
 
 ### `cli/cli.ts` — CLI Entry Point
 
-Small file. Four responsibilities:
+Small file. Five responsibilities:
 1. `parseArgs()` — converts argv into `CliOptions` (including `--dag-stages`)
 2. `handleRuns()` — `claw runs` subcommand, reads run history from disk
 3. `main()` — loads custom stages via `loadAndMergeStages()`, validates pipeline against registry, creates `TaskOrchestrator`, calls `run()`
