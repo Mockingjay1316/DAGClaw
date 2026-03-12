@@ -495,7 +495,6 @@ DAGClaw v0.1.0 is a working multi-stage recursive orchestration engine with CLI,
 - No plan replay / dry run mode
 - No per-subtask resume on failure
 - Single-run lockfile prevents concurrent runs in the same workDir — needs worktree-based isolation for multi-run
-- `acquireLock` has a TOCTOU race condition (check-then-write) — acceptable for CLI use, needs atomic locking for server-spawned multi-run
 
 ## Key Design Decisions
 

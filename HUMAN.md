@@ -256,7 +256,7 @@ Loads custom stages from `dagclaw.config.ts` (dynamic import, priority) or `dagc
 ### `core/taskManager.ts` — Lock, Task Factory & Registry
 
 **Lockfile management (production):**
-- `acquireLock(workDir, runId)` — creates `.dagclaw/lock` with PID. Throws if another instance is running. Note: has a TOCTOU race (check-then-write) — fine for CLI, needs atomic locking for server-spawned multi-run.
+- `acquireLock(workDir, runId)` — atomically creates `.dagclaw/lock` with PID via `wx` flag. Throws if another instance is running. Handles stale locks (dead PID) with atomic re-acquire.
 - `releaseLock(workDir)` — removes the lock file
 - `checkStaleLock(workDir)` — detects lock from a dead process (checks `process.kill(pid, 0)`), cleans up
 

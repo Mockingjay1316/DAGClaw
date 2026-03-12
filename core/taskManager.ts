@@ -28,27 +28,53 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-/** Acquire a lockfile. Throws if another claw instance is running in this workdir. */
+/** Acquire a lockfile atomically. Throws if another claw instance is running in this workdir. */
 export function acquireLock(workDir: string, runId: string): void {
   const lp = lockPath(workDir);
   fs.mkdirSync(path.dirname(lp), { recursive: true });
-
-  if (fs.existsSync(lp)) {
-    const existing: LockInfo = JSON.parse(fs.readFileSync(lp, 'utf-8'));
-    if (isProcessAlive(existing.pid)) {
-      throw new Error(
-        `Another claw instance is already running in ${workDir} (PID ${existing.pid}, run ${existing.runId})`
-      );
-    }
-    // Stale lock — will be overwritten
-  }
 
   const info: LockInfo = {
     pid: process.pid,
     runId,
     startedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(lp, JSON.stringify(info, null, 2));
+  const data = JSON.stringify(info, null, 2);
+
+  try {
+    // Atomic create — fails if file already exists (no TOCTOU race)
+    fs.writeFileSync(lp, data, { flag: 'wx' });
+  } catch (err: any) {
+    if (err?.code !== 'EEXIST') throw err;
+
+    // Lock file exists — check if the holder is still alive
+    let existing: LockInfo;
+    try {
+      existing = JSON.parse(fs.readFileSync(lp, 'utf-8'));
+    } catch {
+      // Corrupted lock — remove and retry
+      fs.unlinkSync(lp);
+      fs.writeFileSync(lp, data, { flag: 'wx' });
+      return;
+    }
+
+    if (isProcessAlive(existing.pid)) {
+      throw new Error(
+        `Another claw instance is already running in ${workDir} (PID ${existing.pid}, run ${existing.runId})`
+      );
+    }
+
+    // Stale lock — remove and re-acquire atomically
+    fs.unlinkSync(lp);
+    try {
+      fs.writeFileSync(lp, data, { flag: 'wx' });
+    } catch (retryErr: any) {
+      // Another process grabbed it between unlink and write
+      if (retryErr?.code === 'EEXIST') {
+        throw new Error(`Another claw instance acquired the lock in ${workDir} during stale lock cleanup`);
+      }
+      throw retryErr;
+    }
+  }
 }
 
 /** Release the lockfile. Safe to call even if no lock exists. */
