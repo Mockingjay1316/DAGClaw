@@ -102,9 +102,7 @@ export async function distillMemory(
     // Regenerate the memory index for progressive disclosure
     memoryManager.updateIndex();
   } catch (err) {
-    const msg = `Memory distillation failed: ${err instanceof Error ? err.message : String(err)}`;
-    if (typeof (logger as any).warn === 'function') {
-      (logger as any).warn(msg);
-    }
+    const msg = `[memoryDistiller] Memory distillation failed: ${err instanceof Error ? err.message : String(err)}\n`;
+    process.stderr.write(msg);
   }
 }
