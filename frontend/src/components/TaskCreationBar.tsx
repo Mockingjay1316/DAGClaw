@@ -2,6 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { useProjectStore } from '../stores/projectStore.ts';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 
+const MODEL_OPTIONS = [
+  { label: 'Default', value: '' },
+  { label: 'Sonnet', value: 'sonnet' },
+  { label: 'Opus', value: 'opus' },
+  { label: 'Haiku', value: 'haiku' },
+  { label: 'Sonnet 1M', value: 'sonnet[1m]' },
+  { label: 'Opus Plan', value: 'opusplan' },
+];
+
 interface TaskCreationBarProps {
   style?: React.CSSProperties;
   className?: string;
@@ -15,6 +24,7 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
   const [prompt, setPrompt] = useState('');
   const [pipeline, setPipeline] = useState('Plan,Execute,Verify');
   const [permissionMode, setPermissionMode] = useState<'interactive' | 'auto-approve' | 'yolo'>('interactive');
+  const [model, setModel] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -43,6 +53,7 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
           prompt: prompt.trim(),
           pipeline: pipeline.split(',').map(s => s.trim()).filter(Boolean),
           permissionMode,
+          model: model || undefined,
           execute,
         }),
       });
@@ -69,11 +80,11 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
 
   return (
     <div
-      className={`flex flex-col ${className ?? ''}`}
+      className={`flex flex-row ${className ?? ''}`}
       style={style}
     >
-      <div className="p-3 flex flex-col gap-2">
-        {/* Textarea container — auto-sizes to content */}
+      {/* Left side — prompt + error + buttons */}
+      <div className="flex-1 p-3 flex flex-col gap-2 min-w-0">
         <div ref={containerRef}>
           <textarea
             ref={textareaRef}
@@ -91,53 +102,69 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
           />
         </div>
 
-        {/* Options and action buttons row — always visible */}
-        <div className="flex items-center gap-4 text-sm flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <label className="text-gray-400">Pipeline:</label>
-            <input
-              type="text"
-              value={pipeline}
-              onChange={(e) => setPipeline(e.target.value)}
-              className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs w-48 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-gray-400">Mode:</label>
-            <select
-              value={permissionMode}
-              onChange={(e) => setPermissionMode(e.target.value as 'interactive' | 'auto-approve' | 'yolo')}
-              className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
-            >
-              <option value="interactive">Interactive</option>
-              <option value="auto-approve">Auto-approve</option>
-              <option value="yolo">YOLO</option>
-            </select>
-          </div>
-
-          <div className="ml-auto flex gap-2">
-            <button
-              onClick={() => submit(false)}
-              disabled={submitting || !prompt.trim()}
-              className="px-3 py-2 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition-colors cursor-pointer whitespace-nowrap"
-              title="Save as TODO"
-            >
-              TODO
-            </button>
-            <button
-              onClick={() => submit(true)}
-              disabled={submitting || !prompt.trim()}
-              className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors cursor-pointer whitespace-nowrap"
-              title="Execute immediately (Ctrl+Enter)"
-            >
-              Execute
-            </button>
-          </div>
-        </div>
-
         {error && (
           <p className="text-sm text-red-400 bg-red-900/30 rounded px-3 py-1.5 flex-shrink-0">{error}</p>
         )}
+
+        <div className="flex items-center justify-end gap-2 flex-shrink-0">
+          <button
+            onClick={() => submit(false)}
+            disabled={submitting || !prompt.trim()}
+            className="px-3 py-2 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition-colors cursor-pointer whitespace-nowrap"
+            title="Save as TODO"
+          >
+            TODO
+          </button>
+          <button
+            onClick={() => submit(true)}
+            disabled={submitting || !prompt.trim()}
+            className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors cursor-pointer whitespace-nowrap"
+            title="Execute immediately (Ctrl+Enter)"
+          >
+            Execute
+          </button>
+        </div>
+      </div>
+
+      {/* Right side — settings drawer */}
+      <div className="border-l border-gray-700 p-3 flex flex-col gap-3 min-w-[180px] w-[200px] flex-shrink-0">
+        <div className="text-xs text-gray-400 font-medium uppercase tracking-wide">Task Config</div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">Pipeline</label>
+          <input
+            type="text"
+            value={pipeline}
+            onChange={(e) => setPipeline(e.target.value)}
+            className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs w-full focus:outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">Mode</label>
+          <select
+            value={permissionMode}
+            onChange={(e) => setPermissionMode(e.target.value as 'interactive' | 'auto-approve' | 'yolo')}
+            className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs w-full focus:outline-none focus:border-blue-500"
+          >
+            <option value="interactive">Interactive</option>
+            <option value="auto-approve">Auto-approve</option>
+            <option value="yolo">YOLO</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">Model</label>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs w-full focus:outline-none focus:border-blue-500"
+          >
+            {MODEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
     </div>
   );

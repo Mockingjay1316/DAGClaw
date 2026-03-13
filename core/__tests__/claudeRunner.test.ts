@@ -100,9 +100,9 @@ describe('claudeRunner', () => {
         systemPrompt: 'you are helpful',
         workDir: '/tmp',
         backend: { type: 'cli' },
-        model: 'claude-3-haiku-20240307',
+        model: 'haiku',
       };
-      assert.equal(opts.model, 'claude-3-haiku-20240307');
+      assert.equal(opts.model, 'haiku');
     });
 
     it('includes --model in CLI args when model is provided', () => {
@@ -111,11 +111,11 @@ describe('claudeRunner', () => {
         systemPrompt: 'you are helpful',
         workDir: '/tmp',
         backend: { type: 'cli' },
-        model: 'claude-3-haiku-20240307',
+        model: 'haiku',
       });
       const modelFlagIndex = args.indexOf('--model');
       assert.ok(modelFlagIndex !== -1, 'args should contain --model flag');
-      assert.equal(args[modelFlagIndex + 1], 'claude-3-haiku-20240307', 'model value should follow --model flag');
+      assert.equal(args[modelFlagIndex + 1], 'haiku', 'model value should follow --model flag');
     });
 
     it('does not include --model in CLI args when model is not provided', () => {
