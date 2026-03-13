@@ -185,7 +185,7 @@ export type WsMessage =
   | { type: 'retry'; taskId: string; indices: number[] }
   | { type: 'usage_update'; taskId: string; usage: { totalInputTokens: number; totalOutputTokens: number; totalCacheReadTokens: number; estimatedCost: number; perStage: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }>; perSubtask: Record<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; estimatedCost: number }> } }
   | { type: 'task_status_changed'; taskId: string; projectId: string; oldStatus: string; newStatus: string }
-  | { type: 'project_tasks_snapshot'; projectId: string; tasks: TaskSummary[] }
+  | { type: 'project_tasks_snapshot'; projectId: string; tasks: TaskSummary[]; counts?: Record<string, number> }
   | { type: 'task_created'; projectId: string; task: TaskSummary };
 
 // --- Client → Server WebSocket Messages ---

@@ -17,6 +17,7 @@ interface StoreApi {
   setVerification: (taskId: string, result: VerificationResult) => void;
   setSubtaskStatus: (taskId: string, index: number, status: SubtaskStatus) => void;
   addRootTask: (task: TaskSummary) => void;
+  setColumnCounts: (counts: Record<string, number>) => void;
   fetchUsage: (taskId: string) => Promise<void>;
 }
 
@@ -26,6 +27,7 @@ type GetState = () => StoreApi & {
   stageInfo: Map<string, { currentStage: string; status: string }>;
   events: Map<string, TimelineEvent[]>;
   usage: Map<string, UsageData>;
+  columnCounts: Record<string, number>;
 };
 
 type SetState = (
@@ -35,6 +37,7 @@ type SetState = (
     stageInfo: Map<string, { currentStage: string; status: string }>;
     events: Map<string, TimelineEvent[]>;
     usage: Map<string, UsageData>;
+    columnCounts: Record<string, number>;
   }) => Record<string, unknown>
 ) => void;
 
@@ -225,7 +228,10 @@ function handleTaskStatusChanged(get: GetState, set: SetState, msg: Extract<WsMe
       }
       return Object.keys(updates).length > 0 ? { ...t, ...updates } : t;
     });
-    return { rootTasks };
+    const columnCounts = { ...state.columnCounts };
+    if (columnCounts[msg.oldStatus] > 0) columnCounts[msg.oldStatus]--;
+    columnCounts[msg.newStatus] = (columnCounts[msg.newStatus] || 0) + 1;
+    return { rootTasks, columnCounts };
   });
 
   // Auto-subscribe when task starts running
@@ -239,6 +245,9 @@ function handleTaskStatusChanged(get: GetState, set: SetState, msg: Extract<WsMe
 }
 
 function handleProjectTasksSnapshot(get: GetState, set: SetState, msg: Extract<WsMessage, { type: 'project_tasks_snapshot' }>) {
+  if (msg.counts) {
+    get().setColumnCounts(msg.counts);
+  }
   set((state) => {
     const nodeMap = new Map(state.nodeMap);
     for (const task of msg.tasks) {
@@ -263,6 +272,11 @@ function handleProjectTasksSnapshot(get: GetState, set: SetState, msg: Extract<W
 
 function handleTaskCreated(get: GetState, set: SetState, msg: Extract<WsMessage, { type: 'task_created' }>) {
   get().addRootTask(msg.task);
+  set((state) => {
+    const columnCounts = { ...state.columnCounts };
+    columnCounts[msg.task.status] = (columnCounts[msg.task.status] || 0) + 1;
+    return { columnCounts };
+  });
   if (msg.task.status === 'completed' && msg.task.runId && !get().usage.has(msg.task.id)) {
     get().fetchUsage(msg.task.id);
   }

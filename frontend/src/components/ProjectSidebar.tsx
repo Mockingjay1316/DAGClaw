@@ -14,6 +14,7 @@ export function ProjectSidebar() {
   const error = useProjectStore((s) => s.error);
 
   const setRootTasks = useOrchestratorStore((s) => s.setRootTasks);
+  const appendTasks = useOrchestratorStore((s) => s.appendTasks);
   const { subscribeProject, unsubscribeProject } = useWebSocket();
 
   const [showAdd, setShowAdd] = useState(false);
@@ -27,26 +28,34 @@ export function ProjectSidebar() {
   // Fetch tasks via HTTP on project select, then subscribe WS for live updates
   useEffect(() => {
     if (selectedProjectId) {
-      // Fetch initial tasks via HTTP (instant load, no WS dependency)
-      fetch(`/api/projects/${selectedProjectId}/tasks`)
-        .then(res => res.ok ? res.json() : [])
-        .then((tasks: Array<{ id: string; status: string }>) => {
-          setRootTasks(tasks as Parameters<typeof setRootTasks>[0]);
-          // Auto-subscribe to running/awaiting_approval tasks for live updates
-          const activeIds = tasks
-            .filter(t => t.status === 'running' || t.status === 'awaiting_approval')
-            .map(t => t.id);
-          if (activeIds.length > 0) {
-            subscribe(activeIds);
-          }
-        })
-        .catch(() => { /* silently ignore */ });
+      // Reset rootTasks for new project
+      setRootTasks([]);
 
-      // Also subscribe via WS for incremental live updates (task_created, task_status_changed)
+      // WS subscription sends active tasks (todo, queued, running, awaiting_approval, pending)
+      // plus counts for all statuses. Terminal tasks are fetched paginated via REST.
       subscribeProject(selectedProjectId);
+
+      // Fetch first 10 terminal tasks per status (paginated)
+      const terminalStatuses = ['completed', 'failed', 'cancelled'];
+      for (const status of terminalStatuses) {
+        fetch(`/api/projects/${selectedProjectId}/tasks?status=${status}&limit=10&offset=0`)
+          .then(res => res.ok ? res.json() : null)
+          .then((data: { tasks: Parameters<typeof appendTasks>[0]; total: number } | null) => {
+            if (data?.tasks) {
+              appendTasks(data.tasks);
+              // Auto-subscribe to running tasks if any (shouldn't be for terminal, but safe)
+              const activeIds = data.tasks
+                .filter((t: { status: string }) => t.status === 'running' || t.status === 'awaiting_approval')
+                .map((t: { id: string }) => t.id);
+              if (activeIds.length > 0) subscribe(activeIds);
+            }
+          })
+          .catch(() => { /* silently ignore */ });
+      }
+
       return () => unsubscribeProject(selectedProjectId);
     }
-  }, [selectedProjectId, subscribeProject, unsubscribeProject, setRootTasks]);
+  }, [selectedProjectId, subscribeProject, unsubscribeProject, setRootTasks, appendTasks]);
 
   async function handleAddProject(e: React.FormEvent) {
     e.preventDefault();

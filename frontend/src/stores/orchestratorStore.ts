@@ -70,10 +70,13 @@ interface OrchestratorState {
   stageInfo: Map<string, StageInfo>;
   events: Map<string, TimelineEvent[]>;
   usage: Map<string, UsageData>;
+  columnCounts: Record<string, number>;
 
   // Actions
   setRootTasks: (tasks: TaskSummary[]) => void;
   addRootTask: (task: TaskSummary) => void;
+  appendTasks: (tasks: TaskSummary[]) => void;
+  setColumnCounts: (counts: Record<string, number>) => void;
   updateTaskStatus: (taskId: string, status: string) => void;
   selectRoot: (id: string | null) => void;
   selectNode: (id: string | null) => void;
@@ -101,6 +104,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   stageInfo: new Map(),
   events: new Map(),
   usage: new Map(),
+  columnCounts: {},
 
   // Actions
   setRootTasks: (tasks) =>
@@ -124,6 +128,26 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       }
       return { rootTasks: [...state.rootTasks, task], nodeMap };
     }),
+
+  appendTasks: (tasks) =>
+    set((state) => {
+      const nodeMap = new Map(state.nodeMap);
+      const existingIds = new Set(state.rootTasks.map(t => t.id));
+      const newTasks: TaskSummary[] = [];
+      for (const task of tasks) {
+        if (!existingIds.has(task.id)) {
+          existingIds.add(task.id);
+          newTasks.push(task);
+        }
+        if (!nodeMap.has(task.id)) {
+          nodeMap.set(task.id, { ...task, hasPendingApproval: false });
+        }
+      }
+      if (newTasks.length === 0) return { nodeMap };
+      return { rootTasks: [...state.rootTasks, ...newTasks], nodeMap };
+    }),
+
+  setColumnCounts: (counts) => set({ columnCounts: counts }),
 
   updateTaskStatus: (taskId, status) =>
     set((state) => {
@@ -283,6 +307,7 @@ export const selectPlans = (state: OrchestratorState) => state.plans;
 export const selectVerifications = (state: OrchestratorState) => state.verifications;
 export const selectSubtaskStatuses = (state: OrchestratorState) => state.subtaskStatuses;
 export const selectStageInfo = (state: OrchestratorState) => state.stageInfo;
+export const selectColumnCounts = (state: OrchestratorState) => state.columnCounts;
 
 // Derived selectors
 export const selectSelectedTask = (state: OrchestratorState): TaskDetail | undefined => {
