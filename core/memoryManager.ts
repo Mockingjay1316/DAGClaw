@@ -40,8 +40,11 @@ export class MemoryManager {
     const files = this.listFiles();
     if (files.length === 0) return '';
 
-    // Put index.md first if it exists
-    const sorted = this.sortFilesIndexFirst(files);
+    // Limit to 10 most recent non-index files to avoid context explosion
+    const nonIndex = files.filter((f) => f !== 'index.md');
+    const recent = nonIndex.slice(-10);
+    const hasIndex = files.includes('index.md');
+    const sorted = hasIndex ? ['index.md', ...recent] : recent;
 
     const parts: string[] = [];
     for (const file of sorted) {
@@ -94,13 +97,6 @@ export class MemoryManager {
     }
 
     return entries;
-  }
-
-  /** Sort files so index.md appears first, rest alphabetically. */
-  private sortFilesIndexFirst(files: string[]): string[] {
-    const hasIndex = files.includes('index.md');
-    if (!hasIndex) return files;
-    return ['index.md', ...files.filter((f) => f !== 'index.md')];
   }
 
   /**

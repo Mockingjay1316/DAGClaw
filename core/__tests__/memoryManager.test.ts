@@ -70,6 +70,26 @@ describe('MemoryManager', () => {
       assert.ok(!content.includes('{}'));
     });
 
+    it('limits to 10 most recent non-index files', () => {
+      const memDir = path.join(tmpDir, '.dagclaw', 'memory');
+      fs.mkdirSync(memDir, { recursive: true });
+      // Create 15 timestamped files
+      for (let i = 1; i <= 15; i++) {
+        const name = `2026-03-${String(i).padStart(2, '0')}T00-00-00_abc.md`;
+        fs.writeFileSync(path.join(memDir, name), `# Memory ${i}`);
+      }
+      fs.writeFileSync(path.join(memDir, 'index.md'), 'INDEX');
+
+      const mm = new MemoryManager(tmpDir);
+      const content = mm.readAll();
+      // Should include index + memories 6-15 (last 10), not 1-5
+      assert.ok(content.includes('INDEX'));
+      assert.ok(!content.includes('# Memory 1\n'));
+      assert.ok(!content.includes('# Memory 5\n'));
+      assert.ok(content.includes('# Memory 6'));
+      assert.ok(content.includes('# Memory 15'));
+    });
+
     it('puts index.md first when it exists', () => {
       const memDir = path.join(tmpDir, '.dagclaw', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
