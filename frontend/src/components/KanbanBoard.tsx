@@ -14,12 +14,32 @@ export function KanbanBoard() {
     const groups: Record<string, TaskSummary[]> = {};
     for (const col of KANBAN_COLUMNS) {
       let colTasks = tasks.filter(t => col.statuses.includes(t.status));
-      // Sort done and failed columns: newest finished first
-      if (col.key === 'done' || col.key === 'failed') {
+      // Sort each column appropriately
+      if (col.key === 'todo' || col.key === 'review') {
+        // Oldest first by createdAt
+        colTasks = [...colTasks].sort((a, b) => {
+          const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return aTime - bTime;
+        });
+      } else if (col.key === 'queued') {
+        // By task number (execution order)
+        colTasks = [...colTasks].sort((a, b) => {
+          return (a.taskNumber ?? Infinity) - (b.taskNumber ?? Infinity);
+        });
+      } else if (col.key === 'running') {
+        // Earliest started first
+        colTasks = [...colTasks].sort((a, b) => {
+          const aTime = (a.startedAt ?? a.createdAt) ? new Date(a.startedAt ?? a.createdAt!).getTime() : 0;
+          const bTime = (b.startedAt ?? b.createdAt) ? new Date(b.startedAt ?? b.createdAt!).getTime() : 0;
+          return aTime - bTime;
+        });
+      } else if (col.key === 'done' || col.key === 'failed') {
+        // Newest finished first
         colTasks = [...colTasks].sort((a, b) => {
           const aTime = a.finishedAt ? new Date(a.finishedAt).getTime() : 0;
           const bTime = b.finishedAt ? new Date(b.finishedAt).getTime() : 0;
-          return bTime - aTime; // newest first
+          return bTime - aTime;
         });
       }
       groups[col.key] = colTasks;
