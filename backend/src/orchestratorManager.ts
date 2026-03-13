@@ -82,6 +82,7 @@ export class OrchestratorManager {
       noMemory: false,
       dagStages: ['Execute'],
       taskNumber: task.taskNumber,
+      model: task.model,
     };
 
     const callbacks = this.buildCallbacks(task);

@@ -154,7 +154,7 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
         return;
       }
 
-      const { prompt, pipeline, permissionMode, execute } = req.body ?? {};
+      const { prompt, pipeline, permissionMode, model, execute } = req.body ?? {};
 
       if (typeof prompt !== 'string' || prompt.trim() === '') {
         res.status(400).json({ error: 'prompt must be a non-empty string' });
@@ -168,6 +168,10 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
         res.status(400).json({ error: 'pipeline must be an array of strings' });
         return;
       }
+      if (model !== undefined && typeof model !== 'string') {
+        res.status(400).json({ error: 'model must be a string' });
+        return;
+      }
 
       if (execute) {
         // Create and immediately execute
@@ -177,6 +181,7 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
           projectId: project.id,
           pipeline,
           permissionMode,
+          model: model || undefined,
         });
         const task = taskStore.getTask(id);
         res.status(201).json(task ? taskStore.toSummary(task) : { id });
@@ -188,6 +193,7 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
           workDir: project.path,
           pipeline,
           permissionMode,
+          model: model || undefined,
         });
         const task = taskStore.getTask(id);
         res.status(201).json(task ? taskStore.toSummary(task) : { id });

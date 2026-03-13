@@ -17,6 +17,7 @@ export interface ManagedTask {
   error?: string;
   pipeline?: string[];
   permissionMode?: ApiPermissionMode;
+  model?: string;
   createdAt: string;
   taskNumber: number;
   startedAt?: string;
@@ -37,6 +38,7 @@ export function toSummary(task: ManagedTask): Record<string, unknown> {
     startedAt: task.startedAt,
     finishedAt: task.finishedAt,
     taskNumber: task.taskNumber,
+    model: task.model,
   };
 }
 

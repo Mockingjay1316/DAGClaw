@@ -33,6 +33,7 @@ export interface TaskSummary {
   startedAt?: string;
   finishedAt?: string;
   taskNumber?: number;
+  model?: string;
 }
 
 export interface TaskDetail extends TaskSummary {

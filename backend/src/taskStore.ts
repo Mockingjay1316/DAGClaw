@@ -65,6 +65,7 @@ export class TaskStore {
     workDir: string;
     pipeline?: string[];
     permissionMode?: ApiPermissionMode;
+    model?: string;
   }): string {
     const taskId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -79,6 +80,7 @@ export class TaskStore {
       orchestrator: null,
       pipeline: opts.pipeline,
       permissionMode: opts.permissionMode,
+      model: opts.model,
       createdAt: now,
       taskNumber: this.stateMachine.allocateTaskNumber(),
     };
@@ -132,6 +134,7 @@ export class TaskStore {
     pipeline?: string[];
     autoApprove?: boolean;
     permissionMode?: ApiPermissionMode;
+    model?: string;
   }): Promise<string> {
     const taskId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -146,6 +149,7 @@ export class TaskStore {
       orchestrator: null,
       pipeline: opts.pipeline,
       permissionMode: opts.permissionMode ?? (opts.autoApprove ? 'auto-approve' : undefined),
+      model: opts.model,
       createdAt: now,
       taskNumber: this.stateMachine.allocateTaskNumber(),
     };
@@ -255,6 +259,7 @@ export class TaskStore {
       projectId: original.projectId,
       pipeline: original.pipeline,
       permissionMode: original.permissionMode,
+      model: original.model,
     });
     return { newId };
   }
