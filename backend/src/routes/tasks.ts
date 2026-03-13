@@ -189,6 +189,28 @@ export function createTasksRouter(taskStore: TaskStore): Router {
     }
   });
 
+  // GET /api/tasks/:id/events — get persisted timeline events
+  router.get('/api/tasks/:id/events', async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id as string;
+      const task = taskStore.getTask(id);
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+      if (!task.runId) {
+        res.status(200).json([]);
+        return;
+      }
+      const logger = new RunLogger(task.workDir);
+      const events = logger.readEvents(task.runId);
+      res.status(200).json(events);
+    } catch (err) {
+      console.error('[tasks] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // POST /api/tasks/:id/approve — approve a pending task
   router.post('/api/tasks/:id/approve', async (req: Request, res: Response) => {
     try {

@@ -11,6 +11,33 @@ import type {
 } from '../types.ts';
 import { handlers, pushEvent } from './wsMessageHandlers.ts';
 
+/** Map a persisted event to a human-readable message (mirrors wsMessageHandlers logic). */
+function buildEventMessage(e: Record<string, unknown>): string {
+  switch (e.type) {
+    case 'stage_start':
+      return `Stage ${e.stageName} started`;
+    case 'stage_complete':
+      return `Stage ${e.stageName ?? ''} completed`;
+    case 'subtask_start':
+      return `Subtask ${e.index} started`;
+    case 'subtask_complete': {
+      const failed = !!e.error;
+      const elapsed = typeof e.elapsed === 'number' ? ` in ${(e.elapsed / 1000).toFixed(1)}s` : '';
+      return `Subtask ${e.index} ${failed ? 'failed' : 'completed'}${elapsed}`;
+    }
+    case 'plan_ready':
+      return `Plan ready (${e.subtaskCount} subtasks)`;
+    case 'approval_required':
+      return `Plan approval required`;
+    case 'approval_resolved':
+      return `Plan ${e.approved ? 'approved' : 'rejected'}`;
+    case 'node_status':
+      return String(e.message ?? '');
+    default:
+      return String(e.type);
+  }
+}
+
 // --- Subtask execution status ---
 type SubtaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
@@ -55,6 +82,7 @@ interface OrchestratorState {
   setVerification: (taskId: string, result: VerificationResult) => void;
   setSubtaskStatus: (taskId: string, index: number, status: SubtaskStatus) => void;
   handleWsMessage: (msg: WsMessage) => void;
+  fetchEvents: (taskId: string) => Promise<void>;
   fetchUsage: (taskId: string) => Promise<void>;
   fetchPlan: (taskId: string) => Promise<void>;
   fetchVerification: (taskId: string) => Promise<void>;
@@ -165,6 +193,30 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         (msg as { type: string }).type,
         (msg as { type: string }).type,
       );
+    }
+  },
+
+  fetchEvents: async (taskId: string) => {
+    // Don't re-fetch if we already have events (from live WS)
+    if ((get().events.get(taskId)?.length ?? 0) > 0) return;
+    try {
+      const resp = await fetch(`/api/tasks/${taskId}/events`);
+      if (!resp.ok) return;
+      const rawEvents = await resp.json();
+      if (!Array.isArray(rawEvents) || rawEvents.length === 0) return;
+      const timelineEvents: TimelineEvent[] = rawEvents.map((e: Record<string, unknown>) => ({
+        timestamp: e.timestamp as number,
+        type: e.type as string,
+        taskId,
+        message: buildEventMessage(e),
+      }));
+      set((state) => {
+        const eventsMap = new Map(state.events);
+        eventsMap.set(taskId, timelineEvents);
+        return { events: eventsMap };
+      });
+    } catch {
+      // Silently ignore fetch errors for events
     }
   },
 

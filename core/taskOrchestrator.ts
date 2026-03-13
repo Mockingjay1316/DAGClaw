@@ -181,6 +181,12 @@ export class TaskOrchestrator {
   private status(msg: string) { this.cb.onStatus?.(msg); }
   private warn(msg: string) { this.cb.onWarning?.(msg); }
 
+  /** Persist a timeline event to the run's events.jsonl (best-effort). */
+  private logEvent(event: Record<string, unknown>): void {
+    if (!this.currentRunId) return;
+    try { this.logger.appendEvent(this.currentRunId, event as { type: string }); } catch { /* best-effort */ }
+  }
+
   /** Run the full pipeline. */
   async run(): Promise<{ runId: string; success: boolean }> {
     if (!this.isChild) {
@@ -236,15 +242,19 @@ export class TaskOrchestrator {
         } else {
           await this.runOne(runId, stage, state);
         }
+        this.logEvent({ type: 'stage_complete', stageName });
 
         // Notify listeners when plan is ready (before approval prompt)
         if (state.plan && this.cb.onPlanReady) {
           this.cb.onPlanReady(state.plan);
           this.cb.onPlanReady = undefined; // fire once
+          this.logEvent({ type: 'plan_ready', subtaskCount: state.plan.subtasks.length });
         }
 
         if (stage.approvalRequired && !this.opts.autoApprove) {
+          this.logEvent({ type: 'approval_required', message: `Approve ${stageName.toLowerCase()}?` });
           const approved = await this.requestApproval(stage, state);
+          this.logEvent({ type: 'approval_resolved', approved });
           if (!approved) {
             this.logger.updateManifestStatus(runId, 'cancelled');
             return { runId, success: false };
@@ -309,8 +319,10 @@ export class TaskOrchestrator {
     } else if (!subtask && this.cb.onStageStart) {
       // Standalone stage: start live ticker
       this.cb.onStageStart(statusLabel, stage.name);
+      this.logEvent({ type: 'stage_start', stageName: stage.name });
     } else {
       this.status(statusLabel);
+      if (!subtask) this.logEvent({ type: 'stage_start', stageName: stage.name });
     }
 
     const resolvedModel = resolveModel(
@@ -383,6 +395,18 @@ export class TaskOrchestrator {
 
   private emitDAG(event: DAGEvent): void {
     this.cb.onDAGEvent?.(event);
+
+    // Persist timeline-relevant DAG events
+    const t = event.type;
+    if (t === 'subtask-started') {
+      this.logEvent({ type: 'subtask_start', index: event.index });
+    } else if (t === 'subtask-completed') {
+      this.logEvent({ type: 'subtask_complete', index: event.index, oneliner: event.oneliner, elapsed: event.elapsed });
+    } else if (t === 'subtask-failed') {
+      this.logEvent({ type: 'subtask_complete', index: event.index, error: event.error, elapsed: event.elapsed });
+    } else if (t === 'subtask-skipped') {
+      this.logEvent({ type: 'subtask_complete', index: event.index, error: `Skipped (cascade from ${event.cascadeFrom})` });
+    }
   }
 
   /** Schedule subtasks via DAG with greedy scheduling — launches tasks as slots free up. */

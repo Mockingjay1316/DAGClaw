@@ -1,16 +1,47 @@
+import { useState, useEffect } from 'react';
 import type { TimelineEvent } from '../types.ts';
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 
-// --- Relative timestamp helper ---
+// --- Dynamic relative timestamp ---
 
-function relativeTime(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 5) return 'just now';
+function relativeTime(timestamp: number, now: number): string {
+  const ms = now - timestamp;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s ago`;
+  const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ago`;
+}
+
+// --- Ticking clock hook ---
+
+function useTickingClock(newestTimestamp: number | undefined): number {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!newestTimestamp) return;
+
+    const getInterval = () => {
+      const age = Date.now() - newestTimestamp;
+      if (age < 10_000) return 100;
+      if (age < 60_000) return 1_000;
+      if (age < 3_600_000) return 60_000;
+      return 3_600_000;
+    };
+
+    let timerId: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      setNow(Date.now());
+      timerId = setTimeout(tick, getInterval());
+    };
+    timerId = setTimeout(tick, getInterval());
+
+    return () => clearTimeout(timerId);
+  }, [newestTimestamp]);
+
+  return now;
 }
 
 // --- Event dot color logic ---
@@ -61,6 +92,8 @@ export function ActivityTimeline({ taskId }: ActivityTimelineProps) {
 
   // Reverse-chronological: newest first
   const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
+  const newestTimestamp = sorted.length > 0 ? sorted[0].timestamp : undefined;
+  const now = useTickingClock(newestTimestamp);
 
   if (sorted.length === 0) {
     return (
@@ -81,7 +114,7 @@ export function ActivityTimeline({ taskId }: ActivityTimelineProps) {
           />
           {/* Relative timestamp */}
           <span className="text-gray-500 shrink-0 w-16">
-            {relativeTime(event.timestamp)}
+            {relativeTime(event.timestamp, now)}
           </span>
           {/* Message */}
           <span className="text-gray-300">{event.message}</span>

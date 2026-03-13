@@ -97,7 +97,7 @@ function handleSubtaskStart(get: GetState, set: SetState, msg: Extract<WsMessage
 function handleSubtaskComplete(get: GetState, set: SetState, msg: Extract<WsMessage, { type: 'subtask_complete' }>) {
   const status: SubtaskStatus = msg.error ? 'failed' : 'completed';
   get().setSubtaskStatus(msg.taskId, msg.index, status);
-  const elapsed = msg.elapsed ? ` in ${msg.elapsed}ms` : '';
+  const elapsed = msg.elapsed ? ` in ${(msg.elapsed / 1000).toFixed(1)}s` : '';
   pushEvent(set, msg.taskId, msg.type, `Subtask ${msg.index} ${msg.error ? 'failed' : 'completed'}${elapsed}`);
 }
 

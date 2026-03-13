@@ -3,7 +3,7 @@
  * Writes manifest incrementally on each subtask completion.
  */
 
-import fs from 'node:fs';
+import fs, { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {
@@ -275,6 +275,21 @@ ${prompt}
       (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     );
     return summaries;
+  }
+
+  /** Append a timeline event to the run's events.jsonl file. */
+  appendEvent(runId: string, event: { type: string; [key: string]: unknown }): void {
+    const eventsPath = path.join(this.runDir(runId), 'events.jsonl');
+    const line = JSON.stringify({ ...event, timestamp: Date.now() }) + '\n';
+    appendFileSync(eventsPath, line);
+  }
+
+  /** Read all persisted timeline events for a run. */
+  readEvents(runId: string): Array<{ timestamp: number; type: string; [key: string]: unknown }> {
+    const eventsPath = path.join(this.runDir(runId), 'events.jsonl');
+    if (!existsSync(eventsPath)) return [];
+    const lines = readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean);
+    return lines.map(line => JSON.parse(line));
   }
 
   /** Write a memory.md file into the run directory. */

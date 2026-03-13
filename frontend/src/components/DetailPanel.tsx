@@ -30,6 +30,7 @@ export function DetailPanel() {
   const usage = useOrchestratorStore((state) =>
     state.selectedNodeId ? state.usage.get(state.selectedNodeId) : undefined
   );
+  const fetchEvents = useOrchestratorStore((state) => state.fetchEvents);
   const fetchUsage = useOrchestratorStore((state) => state.fetchUsage);
   const fetchPlan = useOrchestratorStore((state) => state.fetchPlan);
   const fetchVerification = useOrchestratorStore((state) => state.fetchVerification);
@@ -46,8 +47,9 @@ export function DetailPanel() {
       if (!usage) fetchUsage(selectedNodeId);
       if (!plan) fetchPlan(selectedNodeId);
       if (!verification) fetchVerification(selectedNodeId);
+      fetchEvents(selectedNodeId);
     }
-  }, [selectedNodeId, task?.status, usage, plan, verification, fetchUsage, fetchPlan, fetchVerification]);
+  }, [selectedNodeId, task?.status, usage, plan, verification, fetchUsage, fetchPlan, fetchVerification, fetchEvents]);
 
   async function handleCancel() {
     if (!selectedNodeId) return;
