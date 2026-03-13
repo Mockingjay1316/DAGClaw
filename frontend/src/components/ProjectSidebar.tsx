@@ -15,6 +15,7 @@ export function ProjectSidebar() {
 
   const setRootTasks = useOrchestratorStore((s) => s.setRootTasks);
   const appendTasks = useOrchestratorStore((s) => s.appendTasks);
+  const fetchUsage = useOrchestratorStore((s) => s.fetchUsage);
   const { subscribeProject, unsubscribeProject } = useWebSocket();
 
   const [showAdd, setShowAdd] = useState(false);
@@ -43,6 +44,12 @@ export function ProjectSidebar() {
           .then((data: { tasks: Parameters<typeof appendTasks>[0]; total: number } | null) => {
             if (data?.tasks) {
               appendTasks(data.tasks);
+              // Eagerly fetch usage/cost for terminal tasks
+              for (const t of data.tasks) {
+                if ((t.status === 'completed' || t.status === 'failed') && t.runId) {
+                  fetchUsage(t.id);
+                }
+              }
               // Auto-subscribe to running tasks if any (shouldn't be for terminal, but safe)
               const activeIds = data.tasks
                 .filter((t: { status: string }) => t.status === 'running' || t.status === 'awaiting_approval')
@@ -55,7 +62,7 @@ export function ProjectSidebar() {
 
       return () => unsubscribeProject(selectedProjectId);
     }
-  }, [selectedProjectId, subscribeProject, unsubscribeProject, setRootTasks, appendTasks]);
+  }, [selectedProjectId, subscribeProject, unsubscribeProject, setRootTasks, appendTasks, fetchUsage]);
 
   async function handleAddProject(e: React.FormEvent) {
     e.preventDefault();

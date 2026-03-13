@@ -262,9 +262,9 @@ function handleProjectTasksSnapshot(get: GetState, set: SetState, msg: Extract<W
       nodeMap,
     };
   });
-  // Eagerly fetch usage for completed tasks
+  // Eagerly fetch usage for completed/failed tasks
   for (const task of msg.tasks) {
-    if (task.status === 'completed' && task.runId && !get().usage.has(task.id)) {
+    if ((task.status === 'completed' || task.status === 'failed') && task.runId && !get().usage.has(task.id)) {
       get().fetchUsage(task.id);
     }
   }
@@ -277,7 +277,7 @@ function handleTaskCreated(get: GetState, set: SetState, msg: Extract<WsMessage,
     columnCounts[msg.task.status] = (columnCounts[msg.task.status] || 0) + 1;
     return { columnCounts };
   });
-  if (msg.task.status === 'completed' && msg.task.runId && !get().usage.has(msg.task.id)) {
+  if ((msg.task.status === 'completed' || msg.task.status === 'failed') && msg.task.runId && !get().usage.has(msg.task.id)) {
     get().fetchUsage(msg.task.id);
   }
 }

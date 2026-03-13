@@ -95,13 +95,13 @@ export function TaskCard({ task }: TaskCardProps) {
           )}
         </div>
       </div>
-      {(task.finishedAt || task.status === 'completed') && (
+      {(task.finishedAt || task.status === 'completed' || task.status === 'failed') && (
         <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
           {task.finishedAt && <span>{formatFinishedTime(task.finishedAt)}</span>}
           {formatElapsed(task.startedAt, task.finishedAt) && (
             <span>• {formatElapsed(task.startedAt, task.finishedAt)}</span>
           )}
-          {task.status === 'completed' && (
+          {(task.status === 'completed' || task.status === 'failed') && (
             <span className="ml-auto"><CostDisplay taskId={task.id} compact /></span>
           )}
         </div>
