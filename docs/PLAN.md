@@ -967,11 +967,22 @@ This gives users a natural "pick up where I left off" workflow.
 **Frontend:**
 - **Live Claude output** — Display streamed Claude responses in real time: text as it generates, tool use requests ("Reading file X..."), tool results, plan forming progressively. `subtask_output` WS handler and xterm.js terminal plumbing already exist as placeholders.
 
-### v0.2 — Context management + visualization
+### v0.2 — Memory & context management overhaul + visualization
 
-**Backend:**
-- **Two-phase memory retrieval** — Replace naive `buildContextBlock()` (dumps all files) with selective retrieval: index scan → summary scan → full read. Uses `readSummaries()` (already implemented) + relevance scoring against current task prompt. Compose only the ~10-20 most relevant memories into context.
-- **Context budget enforcement** — Budget enforcement in `runOne()`, drop strategies (compact tier first, oldest transitive deps).
+**Memory & Context Management** (see [`CONTEXT_MANAGEMENT_PLAN.md`](./CONTEXT_MANAGEMENT_PLAN.md) for full design):
+
+The current memory system is run-centric: every memory file is a distilled run log, and the 10 most recent are dumped into every stage prompt regardless of relevance. This causes token waste, no consolidated project knowledge, and staleness when the codebase evolves between runs. v0.2 replaces this with a knowledge-centric, freshness-aware, selectively retrieved context system.
+
+- **`ContextEngine` interface** (`core/contextEngine.ts`) — Pluggable interface replacing direct `MemoryManager` usage. Single integration point in `taskOrchestrator.ts`. Default `FileContextEngine` wraps existing `MemoryManager` for backward compatibility.
+- **Three-phase selective retrieval** — Replace "dump 10 recent files" with: (1) index scan (keyword/recency/category scoring), (2) summary scan (bigram matching, staleness discount), (3) context assembly (budget-aware, cache-optimized ordering). All heuristic-based, no embeddings.
+- **Staleness detection** (`core/stalenessTracker.ts`) — Git-based change detection at pipeline start. Cross-references memory `referencedFiles` against `git diff`. Aggressive handling: staleness > 0.7 excluded by default, steep discount `score *= max(0, 1 - staleness * 1.5)`.
+- **Knowledge layer distillation** — Distillation produces two outputs: run memory (what happened) + knowledge extraction (what to remember). Rule-based extraction for deterministic facts (git diff, deps) + LLM-based for accumulated knowledge (patterns, conventions). Topic-based knowledge files in `.dagclaw/memory/knowledge/` evolve across runs.
+- **Context budget management** — Per-stage budgets (Plan 60%, Execute 40%, Verify 0%). Priority-based pruning: drop low-relevance run memories → drop sections within memories → drop knowledge → truncate working context. Never drops system prompt or plan context.
+- **Four memory categories** — Project Knowledge (distilled, validated), Run History (immutable), Working Context (auto-computed per run), User Context (user-managed, future).
+
+**Phased rollout**: Phase A (v0.2.0) — foundation, backward-compatible. Phase B (v0.2.1) — selective retrieval as default. Phase C (v0.2.2+) — knowledge layer, opt-in.
+
+**Backend (other):**
 - **Plan replay / dry run** — `--plan <runId>` to reuse previous plan, `--dry-run` to plan-only.
 - **Per-subtask resume** — `--resume <runId>` reloads plan, skips completed subtasks, re-runs from failure point.
 - **Stage lifecycle hooks** — `preRun?` / `postRun?` on StageDefinition. Two hooks only, orchestrator stays stage-agnostic.
@@ -980,7 +991,7 @@ This gives users a natural "pick up where I left off" workflow.
 
 **Frontend:**
 - Context flow visualization (what context each subtask receives)
-- Memory panel (view/edit `.dagclaw/memory/`, show title + one-liner + summary per entry)
+- Memory panel (view/edit `.dagclaw/memory/`, show title + one-liner + summary per entry, knowledge vs run entries)
 - Prompt inspector (view exact prompts sent to Claude)
 - DAG graph visualization (interactive dependency graph)
 
