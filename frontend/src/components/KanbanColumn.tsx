@@ -39,7 +39,7 @@ export function KanbanColumn({ columnKey, label, tasks, totalCount, onLoadMore }
   }, [visibleCount, tasks.length, onLoadMore]);
 
   return (
-    <div className={`flex flex-col flex-1 min-w-[140px] border-t-2 ${accent} bg-gray-900/50 rounded-t`}>
+    <div className={`flex flex-col flex-1 min-w-[140px] min-h-0 border-t-2 ${accent} bg-gray-900/50 rounded-t`}>
       {/* Header */}
       <div className="px-3 py-2 flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-300">{label}</h3>
@@ -58,7 +58,7 @@ export function KanbanColumn({ columnKey, label, tasks, totalCount, onLoadMore }
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5 max-h-[calc(100vh-200px)]">
+        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5">
           {visibleTasks.map((task) => (
             <TaskCard key={task.id} task={task} />
           ))}

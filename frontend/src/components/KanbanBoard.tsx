@@ -79,7 +79,7 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
+    <div className="h-full overflow-x-auto overflow-y-hidden p-3">
       <div className="flex gap-2 h-full">
         {KANBAN_COLUMNS.map((col) => (
           <KanbanColumn
