@@ -34,8 +34,10 @@ export function KanbanColumn({ columnKey, label, tasks }: KanbanColumnProps) {
 
       {/* Card list */}
       {isEmpty ? (
-        <div className="flex-1 flex items-center justify-center px-2 pb-2">
-          <span className="text-xs text-gray-600 italic">No Task</span>
+        <div className="px-2 pb-2">
+          <div className="border-l-[3px] border-l-gray-600 px-3 py-4 rounded-r bg-gray-800 flex items-center justify-center">
+            <span className="text-xs text-gray-500">No Task</span>
+          </div>
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5 max-h-[calc(100vh-200px)]">
