@@ -69,7 +69,7 @@ export function TaskCard({ task }: TaskCardProps) {
       <div className="flex items-start gap-2">
         <span className={`w-2 h-2 rounded-full shrink-0 mt-1 ${statusDots[task.status] || 'bg-gray-500'}`} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-200 truncate">{truncate(task.prompt, 80)}</p>
+          <p className="text-sm text-gray-200 line-clamp-3">{task.prompt}</p>
           <div className="flex items-center gap-2 mt-1">
             {stageInfo && task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled' && (
               <span className="text-xs text-gray-500">{stageInfo.currentStage}</span>

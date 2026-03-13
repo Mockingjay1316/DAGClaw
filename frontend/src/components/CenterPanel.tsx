@@ -38,7 +38,7 @@ export function CenterPanel() {
   }, []);
 
   return (
-    <div ref={containerRef} className="flex-1 flex flex-col min-w-[400px] overflow-hidden">
+    <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden">
       {/* Top: Task submission panel */}
       <div className="flex-shrink-0 p-3 overflow-y-auto" style={{ maxHeight: `${topPanelPercent}%` }}>
         <div className="rounded-xl border border-gray-700 bg-gray-800/50 p-4">

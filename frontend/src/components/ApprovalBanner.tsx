@@ -38,8 +38,8 @@ export function ApprovalBanner({ taskId, message }: ApprovalBannerProps) {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-yellow-900/90 backdrop-blur animate-slide-up">
-      <div className="max-w-4xl mx-auto px-4 py-3">
+    <div className="border-t border-yellow-700 bg-yellow-900/90 shrink-0">
+      <div className="px-4 py-3">
         <div className="flex items-center justify-between gap-4">
           <p className="text-yellow-100 text-sm flex-1">{message}</p>
           <div className="flex items-center gap-2 shrink-0">

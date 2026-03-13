@@ -113,7 +113,14 @@ function handleApprovalRequired(get: GetState, set: SetState, msg: Extract<WsMes
         pendingApprovalMessage: msg.message,
       });
     }
-    return { nodeMap };
+    // Fix: update stageInfo to reflect awaiting_approval, not completed
+    const stageInfo = new Map(state.stageInfo);
+    const existingSi = stageInfo.get(msg.taskId);
+    if (existingSi) {
+      stageInfo.set(msg.taskId, { ...existingSi, status: 'awaiting_approval' });
+    }
+
+    return { nodeMap, stageInfo };
   });
   pushEvent(set, msg.taskId, msg.type, `Plan approval required`);
 }

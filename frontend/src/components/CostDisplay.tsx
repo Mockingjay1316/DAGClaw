@@ -17,6 +17,15 @@ export function CostDisplay({ taskId, compact }: { taskId: string; compact?: boo
   }
 
   const stageEntries = Object.entries(usage.perStage);
+  // Aggregate perSubtask into a synthetic "Execute" entry if not already in perStage
+  if (usage.perSubtask && Object.keys(usage.perSubtask).length > 0 && !usage.perStage?.Execute) {
+    let input = 0, output = 0, cache = 0, cost = 0;
+    for (const u of Object.values(usage.perSubtask)) {
+      input += u.inputTokens; output += u.outputTokens;
+      cache += u.cacheReadTokens; cost += u.estimatedCost;
+    }
+    stageEntries.push(['Execute', { inputTokens: input, outputTokens: output, cacheReadTokens: cache, estimatedCost: cost }]);
+  }
 
   return (
     <div>

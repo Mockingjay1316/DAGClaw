@@ -231,6 +231,8 @@ export class TaskOrchestrator {
             continue;
           }
           await this.runDAG(runId, stage, state, subtasks);
+          // Broadcast stage completion for parallel stages (runDAG doesn't call onStageEnd)
+          if (this.cb.onStageEnd) this.cb.onStageEnd();
         } else {
           await this.runOne(runId, stage, state);
         }
@@ -328,10 +330,6 @@ export class TaskOrchestrator {
         model: resolvedModel,
       });
     } catch (err) {
-      // Stop standalone stage ticker on failure too
-      if (!subtask && this.cb.onStageEnd) {
-        this.cb.onStageEnd();
-      }
       // Save partial output on Claude CLI failure
       if (err instanceof ClaudeRunError && err.partialOutput) {
         if (subtask !== undefined) {
@@ -340,20 +338,25 @@ export class TaskOrchestrator {
           this.logger.appendStageLog(runId, stage.name, err.partialOutput);
         }
       }
+      // Stop standalone stage ticker on failure too (after logging)
+      if (!subtask && this.cb.onStageEnd) {
+        this.cb.onStageEnd();
+      }
       throw err;
     }
 
-    // Stop standalone stage ticker
-    if (!subtask && this.cb.onStageEnd) {
-      this.cb.onStageEnd();
-    }
-
+    // Log usage BEFORE broadcasting (so manifest is up-to-date when read)
     if (subtask !== undefined) {
       this.logger.updateSubtaskUsage(runId, subtask.index, result.usage);
       this.logger.appendSubtaskLog(runId, subtask.index, result.rawOutput);
     } else {
       this.logger.updateStageUsage(runId, stage.name, result.usage);
       this.logger.appendStageLog(runId, stage.name, result.rawOutput);
+    }
+
+    // Stop standalone stage ticker
+    if (!subtask && this.cb.onStageEnd) {
+      this.cb.onStageEnd();
     }
 
     // Validate structured output via declared schema

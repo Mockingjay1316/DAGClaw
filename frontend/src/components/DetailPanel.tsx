@@ -157,7 +157,7 @@ export function DetailPanel() {
             <div className="flex-1 max-w-xs">
               <StageIndicator
                 currentStage={stageInfo.currentStage}
-                status={taskStatus === 'completed' ? 'completed' : taskStatus === 'failed' ? 'failed' : stageInfo.status}
+                status={taskStatus === 'completed' ? 'completed' : taskStatus === 'failed' ? 'failed' : taskStatus === 'awaiting_approval' ? 'awaiting_approval' : stageInfo.status}
               />
             </div>
           )}
