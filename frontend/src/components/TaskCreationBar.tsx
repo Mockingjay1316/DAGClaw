@@ -25,19 +25,18 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
   const [pipeline, setPipeline] = useState('Plan,Execute,Verify');
   const [permissionMode, setPermissionMode] = useState<'interactive' | 'auto-approve' | 'yolo'>('interactive');
   const [model, setModel] = useState<string>('');
+  const [dagModel, setDagModel] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-grow textarea to fit content, capped at a reasonable max height
+  // Auto-grow textarea to fit content
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
-    const maxHeight = 300; // cap at 300px to keep the form compact
-    textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+    textarea.style.height = textarea.scrollHeight + 'px';
   }, [prompt]);
 
   async function submit(execute: boolean) {
@@ -54,6 +53,7 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
           pipeline: pipeline.split(',').map(s => s.trim()).filter(Boolean),
           permissionMode,
           model: model || undefined,
+          dagModel: dagModel || undefined,
           execute,
         }),
       });
@@ -85,22 +85,20 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
     >
       {/* Left side — prompt + error + buttons */}
       <div className="flex-1 p-3 flex flex-col gap-2 min-w-0">
-        <div ref={containerRef}>
-          <textarea
-            ref={textareaRef}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the task..."
-            rows={3}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                submit(true);
-              }
-            }}
-          />
-        </div>
+        <textarea
+          ref={textareaRef}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Describe the task..."
+          rows={3}
+          className="w-full flex-1 px-3 py-2 bg-gray-800 border border-gray-600 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submit(true);
+            }
+          }}
+        />
 
         {error && (
           <p className="text-sm text-red-400 bg-red-900/30 rounded px-3 py-1.5 flex-shrink-0">{error}</p>
@@ -158,6 +156,19 @@ export function TaskCreationBar({ style, className }: TaskCreationBarProps) {
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
+            className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs w-full focus:outline-none focus:border-blue-500"
+          >
+            {MODEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">DAG Model</label>
+          <select
+            value={dagModel}
+            onChange={(e) => setDagModel(e.target.value)}
             className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-white text-xs w-full focus:outline-none focus:border-blue-500"
           >
             {MODEL_OPTIONS.map((opt) => (
