@@ -149,6 +149,13 @@ function handleApprovalResolved(get: GetState, set: SetState, msg: Extract<WsMes
       stageInfo.set(msg.taskId, { currentStage: 'Cancelled', status: 'cancelled' });
       return { stageInfo };
     });
+  } else {
+    set((state) => {
+      const stageInfo = new Map(state.stageInfo);
+      const existing = stageInfo.get(msg.taskId);
+      stageInfo.set(msg.taskId, { currentStage: existing?.currentStage ?? 'Plan', status: 'running' });
+      return { stageInfo };
+    });
   }
   pushEvent(set, msg.taskId, msg.type, `Plan ${msg.approved ? 'approved' : 'rejected'}`);
 }

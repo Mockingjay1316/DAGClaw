@@ -236,6 +236,10 @@ export class TaskOrchestrator {
             this.status(`[${stageName}] No subtasks — skipping.`);
             continue;
           }
+          if (this.cb.onStageStart) {
+            this.cb.onStageStart(`[${stageName}] Running DAG...`, stage.name);
+            this.logEvent({ type: 'stage_start', stageName: stage.name });
+          }
           await this.runDAG(runId, stage, state, subtasks);
           // Broadcast stage completion for parallel stages (runDAG doesn't call onStageEnd)
           if (this.cb.onStageEnd) this.cb.onStageEnd();
