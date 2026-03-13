@@ -66,7 +66,7 @@ function App() {
   }, [selectedProjectId, setRootTasks]);
 
   return (
-    <div className="flex h-[95vh] overflow-hidden bg-gray-900 text-gray-100">
+    <div className="flex h-screen overflow-hidden bg-gray-900 text-gray-100">
       {/* Left: Project sidebar */}
       <ProjectSidebar />
 
