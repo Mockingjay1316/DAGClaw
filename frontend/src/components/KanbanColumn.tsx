@@ -21,7 +21,7 @@ export function KanbanColumn({ columnKey, label, tasks }: KanbanColumnProps) {
   const isEmpty = tasks.length === 0;
 
   return (
-    <div className={`flex flex-col min-w-[140px] w-[160px] shrink-0 border-t-2 ${accent} bg-gray-900/50 rounded-t`}>
+    <div className={`flex flex-col flex-1 min-w-[140px] border-t-2 ${accent} bg-gray-900/50 rounded-t`}>
       {/* Header */}
       <div className="px-3 py-2 flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-300">{label}</h3>
@@ -33,7 +33,11 @@ export function KanbanColumn({ columnKey, label, tasks }: KanbanColumnProps) {
       </div>
 
       {/* Card list */}
-      {!isEmpty && (
+      {isEmpty ? (
+        <div className="flex-1 flex items-center justify-center px-2 pb-2">
+          <span className="text-xs text-gray-600 italic">No Task</span>
+        </div>
+      ) : (
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5 max-h-[calc(100vh-200px)]">
           {tasks.map((task) => (
             <TaskCard key={task.id} task={task} />
