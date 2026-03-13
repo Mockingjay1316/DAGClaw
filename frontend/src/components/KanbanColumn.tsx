@@ -53,7 +53,7 @@ export function KanbanColumn({ columnKey, label, tasks, totalCount, onLoadMore }
       {/* Card list */}
       {isEmpty ? (
         <div className="px-2 pb-2">
-          <div className="border-l-[3px] border-l-gray-600 px-3 py-4 rounded-r bg-gray-800 flex items-center justify-center">
+          <div className="border-l-[3px] border-l-gray-600 px-3 py-4 rounded-lg bg-gray-800 flex items-center justify-center">
             <span className="text-xs text-gray-500">No Task</span>
           </div>
         </div>
@@ -65,7 +65,7 @@ export function KanbanColumn({ columnKey, label, tasks, totalCount, onLoadMore }
           {remaining > 0 && (
             <button
               onClick={handleLoadMore}
-              className="w-full border-l-[3px] border-l-gray-600 px-3 py-3 rounded-r bg-gray-800
+              className="w-full border-l-[3px] border-l-gray-600 px-3 py-3 rounded-lg bg-gray-800
                          hover:bg-gray-700 cursor-pointer transition-colors text-center"
             >
               <span className="text-xs text-gray-400">+{remaining} more</span>

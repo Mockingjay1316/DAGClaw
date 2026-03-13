@@ -1,7 +1,7 @@
 import { useOrchestratorStore } from '../stores/orchestratorStore.ts';
 import type { TaskSummary } from '../types.ts';
 import { CostDisplay } from './CostDisplay.tsx';
-import { statusColors, statusDots } from '../utils/colors.ts';
+import { statusColors, statusDots, statusBgs } from '../utils/colors.ts';
 import { truncate, formatElapsed } from '../utils/formatters.ts';
 
 function formatFinishedTime(finishedAt?: string): string | null {
@@ -53,12 +53,14 @@ export function TaskCard({ task }: TaskCardProps) {
     }
   }
 
+  const hasButtons = task.status === 'todo' || task.status === 'failed' || task.status === 'cancelled';
+
   return (
     <div
       onClick={handleClick}
-      className={`border-l-[3px] px-3 py-2 rounded-r bg-gray-800 hover:bg-gray-700 cursor-pointer transition-colors ${
+      className={`border-l-[3px] px-3 py-2.5 rounded-lg hover:bg-gray-700 cursor-pointer transition-colors ${
         statusColors[task.status] || 'border-l-gray-500'
-      } ${isSelected ? 'ring-1 ring-blue-500 bg-gray-700' : ''}`}
+      } ${statusBgs[task.status] || 'bg-gray-800'} ${isSelected ? 'ring-1 ring-blue-500 bg-gray-700' : ''}`}
     >
       {/* Task number */}
       {task.taskNumber != null && task.taskNumber > 0 && (
@@ -76,7 +78,20 @@ export function TaskCard({ task }: TaskCardProps) {
             )}
           </div>
         </div>
-        <div className="shrink-0 flex gap-1">
+      </div>
+      {(task.finishedAt || task.status === 'completed' || task.status === 'failed') && (
+        <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+          {task.finishedAt && <span>{formatFinishedTime(task.finishedAt)}</span>}
+          {formatElapsed(task.startedAt, task.finishedAt) && (
+            <span>• {formatElapsed(task.startedAt, task.finishedAt)}</span>
+          )}
+          {(task.status === 'completed' || task.status === 'failed') && (
+            <span className="ml-auto"><CostDisplay taskId={task.id} compact /></span>
+          )}
+        </div>
+      )}
+      {hasButtons && (
+        <div className="flex justify-end gap-1 mt-2">
           {task.status === 'todo' && (
             <button
               onClick={handleExecute}
@@ -92,17 +107,6 @@ export function TaskCard({ task }: TaskCardProps) {
             >
               Retry
             </button>
-          )}
-        </div>
-      </div>
-      {(task.finishedAt || task.status === 'completed' || task.status === 'failed') && (
-        <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-          {task.finishedAt && <span>{formatFinishedTime(task.finishedAt)}</span>}
-          {formatElapsed(task.startedAt, task.finishedAt) && (
-            <span>• {formatElapsed(task.startedAt, task.finishedAt)}</span>
-          )}
-          {(task.status === 'completed' || task.status === 'failed') && (
-            <span className="ml-auto"><CostDisplay taskId={task.id} compact /></span>
           )}
         </div>
       )}

@@ -10,6 +10,18 @@ export const statusColors: Record<string, string> = {
   cancelled: 'border-l-gray-500',
 };
 
+/** Status → Tailwind subtle background tint for task cards. */
+export const statusBgs: Record<string, string> = {
+  todo: 'bg-gray-800',
+  queued: 'bg-yellow-950/30',
+  running: 'bg-blue-950/30',
+  awaiting_approval: 'bg-yellow-950/30',
+  pending: 'bg-yellow-950/30',
+  completed: 'bg-green-950/30',
+  failed: 'bg-red-950/30',
+  cancelled: 'bg-gray-800',
+};
+
 /** Status → Tailwind dot color class (with animations). */
 export const statusDots: Record<string, string> = {
   todo: 'bg-gray-500',
