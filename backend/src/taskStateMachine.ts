@@ -83,4 +83,57 @@ export class TaskStateMachine {
   getTasksByStatus(status: ManagedTaskStatus): ManagedTask[] {
     return this.listTasks().filter(t => t.status === status);
   }
+
+  /** Get task counts per status for a project. */
+  getTaskCountsByProject(projectId: string): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const task of this.tasks.values()) {
+      if (task.projectId === projectId) {
+        counts[task.status] = (counts[task.status] || 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  /** Get paginated tasks for a project, sorted by status-appropriate field. */
+  getTasksByProjectPaginated(projectId: string, opts: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): { tasks: ManagedTask[]; total: number } {
+    let tasks = this.getTasksByProject(projectId);
+    if (opts.status) {
+      tasks = tasks.filter(t => t.status === opts.status);
+    }
+    const total = tasks.length;
+
+    const status = opts.status;
+    if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+      tasks.sort((a, b) => {
+        const aTime = a.finishedAt ? new Date(a.finishedAt).getTime() : 0;
+        const bTime = b.finishedAt ? new Date(b.finishedAt).getTime() : 0;
+        return bTime - aTime;
+      });
+    } else if (status === 'queued') {
+      tasks.sort((a, b) => (a.taskNumber ?? Infinity) - (b.taskNumber ?? Infinity));
+    } else if (status === 'running') {
+      tasks.sort((a, b) => {
+        const aTime = new Date(a.startedAt ?? a.createdAt).getTime();
+        const bTime = new Date(b.startedAt ?? b.createdAt).getTime();
+        return aTime - bTime;
+      });
+    } else {
+      tasks.sort((a, b) => {
+        const aTime = new Date(a.createdAt).getTime();
+        const bTime = new Date(b.createdAt).getTime();
+        return aTime - bTime;
+      });
+    }
+
+    if (opts.limit !== undefined) {
+      const offset = opts.offset ?? 0;
+      tasks = tasks.slice(offset, offset + opts.limit);
+    }
+    return { tasks, total };
+  }
 }

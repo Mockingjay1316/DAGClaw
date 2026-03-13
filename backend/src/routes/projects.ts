@@ -108,7 +108,7 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
     }
   });
 
-  // GET /api/projects/:id/tasks — list tasks for project
+  // GET /api/projects/:id/tasks — list tasks for project (supports pagination)
   router.get('/api/projects/:id/tasks', (req: Request, res: Response) => {
     try {
       const project = projectStore.getProject(req.params.id as string);
@@ -117,16 +117,28 @@ export function createProjectsRouter(projectStore: ProjectStore, taskStore: Task
         return;
       }
 
-      let tasks = taskStore.getTasksByProject(project.id);
-
-      // Optional status filter
       const statusFilter = typeof req.query.status === 'string' ? req.query.status : undefined;
-      if (statusFilter) {
-        tasks = tasks.filter(t => t.status === statusFilter);
-      }
+      const limitParam = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+      const offsetParam = typeof req.query.offset === 'string' ? parseInt(req.query.offset, 10) : undefined;
 
-      const summaries = tasks.map(t => taskStore.toSummary(t));
-      res.status(200).json(summaries);
+      // When limit is provided, return paginated { tasks, total } envelope
+      if (limitParam !== undefined && !isNaN(limitParam)) {
+        const result = taskStore.getTasksByProjectPaginated(project.id, {
+          status: statusFilter,
+          limit: limitParam,
+          offset: offsetParam !== undefined && !isNaN(offsetParam) ? offsetParam : 0,
+        });
+        const summaries = result.tasks.map(t => taskStore.toSummary(t));
+        res.status(200).json({ tasks: summaries, total: result.total });
+      } else {
+        // Backward compat: bare array
+        let tasks = taskStore.getTasksByProject(project.id);
+        if (statusFilter) {
+          tasks = tasks.filter(t => t.status === statusFilter);
+        }
+        const summaries = tasks.map(t => taskStore.toSummary(t));
+        res.status(200).json(summaries);
+      }
     } catch (err) {
       console.error('[projects] Error:', err);
       res.status(500).json({ error: 'Internal server error' });

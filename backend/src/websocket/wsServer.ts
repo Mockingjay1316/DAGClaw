@@ -8,6 +8,7 @@ import { timingSafeCompare } from '../middleware/auth.ts';
 /** Read-only data source for serving snapshots on project subscription. */
 export interface TaskDataSource {
   getTasksByProject(projectId: string): unknown[];
+  getTaskCountsByProject(projectId: string): Record<string, number>;
   toSummary(task: unknown): Record<string, unknown>;
 }
 
@@ -186,14 +187,18 @@ export class WsServer {
         }
         const projectId = msg.projectId as string;
         this.projectSubscriptions.subscribe(clientId, [projectId]);
-        // Send current project tasks snapshot
+        // Send current project tasks snapshot (active tasks only) + counts for all statuses
         if (this.dataSource) {
-          const tasks = this.dataSource.getTasksByProject(projectId);
-          const summaries = tasks.map(t => this.dataSource!.toSummary(t));
+          const ACTIVE_STATUSES = new Set(['todo', 'queued', 'running', 'awaiting_approval', 'pending']);
+          const allTasks = this.dataSource.getTasksByProject(projectId);
+          const activeTasks = allTasks.filter((t: any) => ACTIVE_STATUSES.has(t.status));
+          const summaries = activeTasks.map(t => this.dataSource!.toSummary(t));
+          const counts = this.dataSource.getTaskCountsByProject(projectId);
           ws.send(JSON.stringify({
             type: 'project_tasks_snapshot',
             projectId,
             tasks: summaries,
+            counts,
           }));
         }
         break;

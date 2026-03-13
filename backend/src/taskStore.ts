@@ -199,6 +199,20 @@ export class TaskStore {
     return this.stateMachine.getTasksByStatus(status);
   }
 
+  /** Get task counts per status for a project. */
+  getTaskCountsByProject(projectId: string): Record<string, number> {
+    return this.stateMachine.getTaskCountsByProject(projectId);
+  }
+
+  /** Get paginated tasks for a project. */
+  getTasksByProjectPaginated(projectId: string, opts: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): { tasks: ManagedTask[]; total: number } {
+    return this.stateMachine.getTasksByProjectPaginated(projectId, opts);
+  }
+
   /** Approve a pending task. Returns true if approval was pending. */
   approveTask(id: string): boolean {
     const task = this.stateMachine.getTask(id);
