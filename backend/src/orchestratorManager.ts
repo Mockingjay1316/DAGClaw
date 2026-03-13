@@ -83,6 +83,7 @@ export class OrchestratorManager {
       dagStages: ['Execute'],
       taskNumber: task.taskNumber,
       model: task.model,
+      dagModel: task.dagModel,
     };
 
     const callbacks = this.buildCallbacks(task);

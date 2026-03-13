@@ -18,6 +18,7 @@ export interface ManagedTask {
   pipeline?: string[];
   permissionMode?: ApiPermissionMode;
   model?: string;
+  dagModel?: string;
   createdAt: string;
   taskNumber: number;
   startedAt?: string;
@@ -39,6 +40,7 @@ export function toSummary(task: ManagedTask): Record<string, unknown> {
     finishedAt: task.finishedAt,
     taskNumber: task.taskNumber,
     model: task.model,
+    dagModel: task.dagModel,
   };
 }
 

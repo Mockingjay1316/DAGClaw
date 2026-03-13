@@ -10,6 +10,7 @@ export interface TodoTaskFile {
     pipeline?: string[];
     permissionMode?: ApiPermissionMode;
     model?: string;
+    dagModel?: string;
     createdAt: string;
     taskNumber: number;
   }>;
@@ -35,6 +36,7 @@ export function persistTodoTask(task: ManagedTask): void {
       pipeline: task.pipeline,
       permissionMode: task.permissionMode,
       model: task.model,
+      dagModel: task.dagModel,
       createdAt: task.createdAt,
       taskNumber: task.taskNumber,
     });

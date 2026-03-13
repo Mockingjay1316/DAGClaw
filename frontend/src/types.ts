@@ -34,6 +34,7 @@ export interface TaskSummary {
   finishedAt?: string;
   taskNumber?: number;
   model?: string;
+  dagModel?: string;
 }
 
 export interface TaskDetail extends TaskSummary {

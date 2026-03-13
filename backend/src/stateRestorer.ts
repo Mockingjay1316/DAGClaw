@@ -10,6 +10,7 @@ interface TodoTaskEntry {
   pipeline?: string[];
   permissionMode?: ApiPermissionMode;
   model?: string;
+  dagModel?: string;
   createdAt: string;
   taskNumber?: number;
 }
@@ -81,6 +82,7 @@ function restoreTodoTasks(project: Project, taskStore: TaskStore): number {
         pipeline: entry.pipeline,
         permissionMode: entry.permissionMode,
         model: entry.model,
+        dagModel: entry.dagModel,
         createdAt: entry.createdAt,
         taskNumber: entry.taskNumber ?? 0,
       };
